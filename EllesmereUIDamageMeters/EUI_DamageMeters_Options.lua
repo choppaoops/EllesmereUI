@@ -53,6 +53,17 @@ initFrame:SetScript("OnEvent", function(self)
         }
     end
 
+    -- Variant with "Match Damage Meters" at the top (for breakdown / spell history)
+    local matchTexValues = { match = "Match Damage Meters" }
+    local matchTexOrder  = { "match", "---" }
+    for _, key in ipairs(dmTexOrder) do
+        matchTexOrder[#matchTexOrder + 1] = key
+        if key ~= "---" then
+            matchTexValues[key] = dmTexValues[key]
+        end
+    end
+    matchTexValues._menuOpts = dmTexValues._menuOpts
+
     local function BuildPage(_, parent, yOffset)
         local W  = EllesmereUI.Widgets
         local PP = EllesmereUI.PP
@@ -508,7 +519,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Bar Texture",
               values = dmTexValues, order = dmTexOrder,
               getValue = function() return Cfg("barTexture") or "none" end,
-              setValue = function(v) Set("barTexture", v); Refresh() end },
+              setValue = function(v) Set("barTexture", v); Refresh(); if ns.ApplySpellHistory then ns.ApplySpellHistory() end end },
             { type="slider", text="Bar Height", min = 8, max = 40, step = 1,
               getValue = function() return Cfg("barHeight") or 18 end,
               setValue = function(v) Set("barHeight", v); Refresh() end })
@@ -588,6 +599,44 @@ initFrame:SetScript("OnEvent", function(self)
               order  = _G._EDM_IconStyleOrder or {},
               getValue = function() return Cfg("iconStyle") or "spec" end,
               setValue = function(v) Set("iconStyle", v); Refresh() end })
+        y = y - h
+
+        -- Show Breakdown on Hover (+ inline cog) | Breakdown Bar Texture
+        local bdRow
+        bdRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Breakdown on Hover",
+              getValue = function() return Cfg("showHoverTooltip") ~= false end,
+              setValue = function(v) Set("showHoverTooltip", v) end },
+            { type="dropdown", text="Hover Breakdown Texture",
+              values = matchTexValues, order = matchTexOrder,
+              getValue = function() return Cfg("breakdownBarTexture") or "match" end,
+              setValue = function(v) Set("breakdownBarTexture", v); Refresh() end })
+        do
+            local rgn = bdRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Breakdown Settings",
+                rows = {
+                    { type = "slider", label = "Scale", min = 80, max = 150, step = 1,
+                      get = function() return (Cfg("hoverTooltipScale") or 100) end,
+                      set = function(v) Set("hoverTooltipScale", v) end },
+                    { type = "toggle", label = "Show in Center of Screen",
+                      get = function() return Cfg("breakdownAnchorPoint") == "center" end,
+                      set = function(v) Set("breakdownAnchorPoint", v and "center" or "row") end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
         y = y - h
 
         -- ── BAR TEXT ────────────────────────────────────────────────────
@@ -766,64 +815,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- ── BREAKDOWN ───────────────────────────────────────────────────
-        _, h = W:SectionHeader(parent, "BREAKDOWN", y); y = y - h
-
-        -- Show Breakdown on Hover (+ inline cog) | Breakdown Anchor Point
-        local bdRow
-        bdRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Breakdown on Hover",
-              getValue = function() return Cfg("showHoverTooltip") ~= false end,
-              setValue = function(v) Set("showHoverTooltip", v) end },
-            {
-                type = "dropdown",
-                text = "Breakdown Anchor Point",
-                values = { ["row"] = "Above Row", ["center"] = "Center of Screen" },
-                order = { "row", "center" },
-                getValue = function() return Cfg("breakdownAnchorPoint") or "row" end,
-                setValue = function(v) Set("breakdownAnchorPoint", v) end
-            })
-        do
-            local rgn = bdRow._leftRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Hover Tooltip Scale",
-                rows = {
-                    { type = "slider", label = "Scale", min = 80, max = 150, step = 1,
-                      get = function() return (Cfg("hoverTooltipScale") or 100) end,
-                      set = function(v) Set("hoverTooltipScale", v) end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, rgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = cogBtn
-            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-        end
-        y = y - h
-
-        -- Override Bar Texture | Bar Texture
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Override Bar Texture",
-              getValue = function() return Cfg("breakdownBarTextureOverride") or false end,
-              setValue = function(v) Set("breakdownBarTextureOverride", v); Refresh(); EllesmereUI:RefreshPage() end },
-            { type="dropdown", text="Bar Texture",
-              values   = dmTexValues,
-              order    = dmTexOrder,
-              disabled = function() return not Cfg("breakdownBarTextureOverride") end,
-              disabledTooltip = "Override Bar Texture to be enabled",
-              getValue = function()
-                  return Cfg("breakdownBarTexture") or Cfg("barTexture") or "atrocity"
-              end,
-              setValue = function(v) Set("breakdownBarTexture", v); Refresh() end })
-        y = y - h
-
         -- ── STANDALONE COMBAT TIMER ──────────────────────────────────
         _, h = W:SectionHeader(parent, "STANDALONE COMBAT TIMER", y); y = y - h
 
@@ -891,7 +882,15 @@ initFrame:SetScript("OnEvent", function(self)
                       get = function() return Cfg("standaloneTimerSize") or 26 end,
                       set = function(v) Set("standaloneTimerSize", v); ApplySAT() end },
                     { type = "toggle", label = "Align Text Left",
-                      get = function() return Cfg("standaloneTimerAlignLeft") or false end,
+                      disabled = function() return (Cfg("standaloneTimerAnchor") or "free") ~= "free" end,
+                      disabledTooltip = "Anchor to Windows set to Free Move",
+                      get = function()
+                          local anchor = Cfg("standaloneTimerAnchor") or "free"
+                          if anchor ~= "free" then
+                              return anchor == "topleft" or anchor == "bottomleft"
+                          end
+                          return Cfg("standaloneTimerAlignLeft") or false
+                      end,
                       set = function(v) Set("standaloneTimerAlignLeft", v); ApplySAT() end },
                 },
             })
@@ -910,10 +909,17 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- "Hold Shift+Click..." label | (empty)
+        -- "Hold Shift+Click..." label | Anchor to Windows
         _, h = W:DualRow(parent, y,
             { type="label", text="Hold Shift+Click to Freely Move Standalone Timer" },
-            { type="label", text="" })
+            { type="dropdown", text="Anchor to Windows",
+              disabled = function() return not Cfg("standaloneTimer") end,
+              disabledTooltip = "Standalone Combat Timer to be enabled",
+              values = { free = "Free Move", topleft = "Top Left", topright = "Top Right",
+                         bottomleft = "Bottom Left", bottomright = "Bottom Right" },
+              order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
+              getValue = function() return Cfg("standaloneTimerAnchor") or "free" end,
+              setValue = function(v) Set("standaloneTimerAnchor", v); ApplySAT() end })
         y = y - h
 
         return math.abs(y)
@@ -1148,25 +1154,22 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) SHDB().maxBars = v; RefreshSH() end }
         );  y = y - h
 
-                -- Row 4: Override Bar Texture | Bar Texture
-                _, h = W:DualRow(parent, y,
-                        { type = "toggle", text = "Override Bar Texture",
-                            disabled = barOff, disabledTooltip = "Enable Bar History",
-                            getValue = function() return SHDB().spellHistoryBarTextureOverride or false end,
-                            setValue = function(v)
-                                    SHDB().spellHistoryBarTextureOverride = v
-                                    RefreshSH(); EllesmereUI:RefreshPage()
-                            end },
-                        { type = "dropdown", text = "Bar Texture",
-                            values = dmTexValues,
-                            order  = dmTexOrder,
-                            disabled = function() return barOff() or not SHDB().spellHistoryBarTextureOverride end,
-                            disabledTooltip = "Override Bar Texture to be enabled",
-                            getValue = function() return SHDB().spellHistoryBarTexture or Cfg("barTexture") or "atrocity" end,
-                            setValue = function(v) SHDB().spellHistoryBarTexture = v; RefreshSH() end }
-                );  y = y - h
+        -- Row 4: Bar Texture | Text Size (+ inline dual swatches)
+        local textRow
+        textRow, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Bar Texture",
+              disabled = barOff, disabledTooltip = "Enable Bar History",
+              values = matchTexValues, order = matchTexOrder,
+              getValue = function() return SHDB().spellHistoryBarTexture or "match" end,
+              setValue = function(v) SHDB().spellHistoryBarTexture = v; RefreshSH() end },
+            { type = "slider", text = "Text Size",
+              min = 8, max = 16, step = 1,
+              disabled = barOff, disabledTooltip = "Enable Bar History",
+              getValue = function() return SHDB().textSize or 11 end,
+              setValue = function(v) SHDB().textSize = v; RefreshSH() end }
+        );  y = y - h
 
-                -- Row 5: Bar Color | Opacity
+        -- Row 5: Bar Color | Opacity
         _, h = W:DualRow(parent, y,
             { type = "multiSwatch", text = "Bar Color",
               disabled = barOff, disabledTooltip = "Enable Bar History",
@@ -1232,18 +1235,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) SHDB().barOpacity = v; RefreshSH() end }
         );  y = y - h
 
-                -- Row 6: Text Size (+ inline dual swatches: custom + accent) | (empty)
-        local textRow
-        textRow, h = W:DualRow(parent, y,
-            { type = "slider", text = "Text Size",
-              min = 8, max = 16, step = 1,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
-              getValue = function() return SHDB().textSize or 11 end,
-              setValue = function(v) SHDB().textSize = v; RefreshSH() end },
-            { type = "label", text = "" }
-        );  y = y - h
         do
-            local rgn = textRow._leftRegion
+            local rgn = textRow._rightRegion
             local ctrl = rgn._control
 
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(

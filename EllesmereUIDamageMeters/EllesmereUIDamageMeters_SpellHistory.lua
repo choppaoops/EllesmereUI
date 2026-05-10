@@ -46,8 +46,7 @@ local SH_DEFAULTS = {
     barColorUseAccent = false,
     barColor        = { r = 0.298, g = 0.565, b = 0.494 },  -- #4C907E
     barOpacity      = 1,
-    spellHistoryBarTextureOverride = false,
-    spellHistoryBarTexture = nil,
+    spellHistoryBarTexture = "match",
     textSize        = 11,
     textColorUseAccent = false,
     textColor       = { r = 1, g = 1, b = 1 },
@@ -118,10 +117,8 @@ end
 local function GetBarTexturePath()
     local dmCfg = ns.EDM.DB()
     local sh = DB()
-    local key
-    if sh.spellHistoryBarTextureOverride and sh.spellHistoryBarTexture then
-        key = sh.spellHistoryBarTexture
-    else
+    local key = sh.spellHistoryBarTexture
+    if not key or key == "match" then
         key = (dmCfg and dmCfg.barTexture) or "none"
     end
     local texTable = _G._EDM_BarTextures

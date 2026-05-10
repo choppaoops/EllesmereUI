@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Quality of Life features and Cursor skinning
 ## Author: Ellesmere
-## Version: 7.6
+## Version: 7.6.1
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQoLDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

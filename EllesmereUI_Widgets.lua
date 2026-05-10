@@ -3839,7 +3839,28 @@ local function BuildCogPopup(opts)
                     if pf._refresh then pf._refresh() end
                 end)
 
-                rowWidgets[#rowWidgets + 1] = { type = "toggle", updateVisual = UpdateToggleVisual }
+                -- Disabled overlay for toggle
+                local toggleDis
+                if row.disabled then
+                    toggleDis = CreateFrame("Frame", nil, pf)
+                    toggleDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
+                    toggleDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    toggleDis:SetHeight(TOGGLE_ROW_H)
+                    toggleDis:SetFrameLevel(pf:GetFrameLevel() + 10)
+                    toggleDis:EnableMouse(true)
+                    local disTex = SolidTex(toggleDis, "OVERLAY", 0.06, 0.08, 0.10, 0.70)
+                    disTex:SetAllPoints()
+                    local disTip = row.disabledTooltip
+                    toggleDis:SetScript("OnEnter", function(self)
+                        local tip = type(disTip) == "function" and disTip() or disTip
+                        if tip and EllesmereUI.ShowWidgetTooltip then
+                            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip(tip))
+                        end
+                    end)
+                    toggleDis:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
+                end
+
+                rowWidgets[#rowWidgets + 1] = { type = "toggle", updateVisual = UpdateToggleVisual, disOverlay = toggleDis, disCheck = row.disabled }
                 curY = curY - TOGGLE_ROW_H
             elseif row.type == 'dropdown' then
                 local lbl = MakeFont(pf, 11, nil, 1, 1, 1); lbl:SetAlpha(0.6)
@@ -4075,6 +4096,11 @@ local function BuildCogPopup(opts)
                     end
                     if rw.updateVisual and rw.get then rw.updateVisual(rw.get()) end
                 elseif rw.type == "toggle" then
+                    if rw.disOverlay and rw.disCheck then
+                        local dis
+                        if type(rw.disCheck) == "function" then dis = rw.disCheck() else dis = rw.disCheck end
+                        if dis then rw.disOverlay:Show() else rw.disOverlay:Hide() end
+                    end
                     if rw.updateVisual then rw.updateVisual() end
                 elseif rw.type == 'colorpicker' then
                     if rw.disCheck then

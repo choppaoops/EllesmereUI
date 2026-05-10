@@ -89,8 +89,7 @@ local DM_DEFAULTS = {
             showPinnedSelf  = false,
             showHoverTooltip = true,
             breakdownAnchorPoint = "row", -- "row" (Above Row) | "center" (Center of Screen)
-            breakdownBarTextureOverride = false,
-            breakdownBarTexture = nil,
+            breakdownBarTexture = "match",
             barColorUseAccent = true,
             barColor        = { r = 0.35, g = 0.55, b = 0.8 },
             barFillAlpha    = 1,
@@ -106,6 +105,7 @@ local DM_DEFAULTS = {
             standaloneTimerUseAccent = false,
             standaloneTimerColor  = { r = 1, g = 1, b = 1 },
             standaloneTimerPos    = nil,
+            standaloneTimerAnchor = "free",
             refreshRate = 0.5,
             hdrBgColor      = { r = 0x1B/255, g = 0x1B/255, b = 0x1B/255 },
             hdrBgAlpha      = 1,
@@ -463,9 +463,9 @@ end
 
 local function GetBreakdownBarTexturePath()
     local cfg = DB()
-    local key = cfg and cfg.barTexture or "none"
-    if cfg and cfg.breakdownBarTextureOverride and cfg.breakdownBarTexture then
-        key = cfg.breakdownBarTexture
+    local key = cfg and cfg.breakdownBarTexture
+    if not key or key == "match" then
+        key = cfg and cfg.barTexture or "none"
     end
     return EUI.ResolveTexturePath(DM_BAR_TEXTURES, key, BAR_TEX), key
 end
@@ -3638,7 +3638,14 @@ local function ApplySATimerStyle()
     local r, g, b = GetSATimerColor()
     _saTimerFS:SetTextColor(r, g, b, 1)
     _saTimerFS:ClearAllPoints()
-    if cfg.standaloneTimerAlignLeft then
+    local anchor = cfg.standaloneTimerAnchor or "free"
+    local alignLeft
+    if anchor == "free" then
+        alignLeft = cfg.standaloneTimerAlignLeft
+    else
+        alignLeft = anchor == "topleft" or anchor == "bottomleft"
+    end
+    if alignLeft then
         _saTimerFS:SetPoint("LEFT")
         _saTimerFS:SetJustifyH("LEFT")
     else
@@ -3661,6 +3668,65 @@ UpdateSATimerText = function()
     _saTimerFS:SetText(FormatTimer(elapsed > 0 and elapsed or 0))
 end
 
+local function RepositionSATimer()
+    if not _saTimer then return end
+    local cfg = DB()
+    local anchor = cfg.standaloneTimerAnchor or "free"
+
+    _saTimer:ClearAllPoints()
+
+    if anchor == "free" then
+        _saTimer:SetMovable(true)
+        _saTimer:EnableMouse(true)
+        local pos = cfg.standaloneTimerPos
+        if pos and pos.x and pos.y then
+            _saTimer:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
+        else
+            local W1 = _windows[1]
+            if W1 and W1.frame then
+                _saTimer:SetPoint("BOTTOMRIGHT", W1.frame, "TOPRIGHT", 0, 5)
+            else
+                _saTimer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
+        end
+        return
+    end
+
+    _saTimer:SetMovable(false)
+    _saTimer:EnableMouse(false)
+
+    -- Find the highest (max top) and lowest (min bottom) window
+    local topWin, botWin
+    local maxTop, minBot = -math.huge, math.huge
+    for _, w in ipairs(_windows) do
+        if w.frame and w.frame:IsShown() then
+            local t = w.frame:GetTop()
+            local b = w.frame:GetBottom()
+            if t and t > maxTop then maxTop = t; topWin = w end
+            if b and b < minBot then minBot = b; botWin = w end
+        end
+    end
+
+    local isTop = anchor == "topleft" or anchor == "topright"
+    local isLeft = anchor == "topleft" or anchor == "bottomleft"
+    local ref = isTop and topWin or botWin
+
+    if not ref or not ref.frame then
+        _saTimer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        return
+    end
+
+    if isTop and isLeft then
+        _saTimer:SetPoint("BOTTOMLEFT", ref.frame, "TOPLEFT", 0, 0)
+    elseif isTop then
+        _saTimer:SetPoint("BOTTOMRIGHT", ref.frame, "TOPRIGHT", 0, 0)
+    elseif isLeft then
+        _saTimer:SetPoint("TOPLEFT", ref.frame, "BOTTOMLEFT", 0, 0)
+    else
+        _saTimer:SetPoint("TOPRIGHT", ref.frame, "BOTTOMRIGHT", 0, 0)
+    end
+end
+
 local function CreateSATimer()
     if _saTimer then return end
     local cfg = DB()
@@ -3672,13 +3738,17 @@ local function CreateSATimer()
     _saTimer:EnableMouse(true)
     _saTimer:SetFrameStrata("HIGH")
     _saTimer:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" and IsShiftKeyDown() then self:StartMoving() end
+        if button == "LeftButton" and IsShiftKeyDown() then
+            local c = DB()
+            if (c.standaloneTimerAnchor or "free") == "free" then self:StartMoving() end
+        end
     end)
     _saTimer:SetScript("OnMouseUp", function(self)
         self:StopMovingOrSizing()
-        local left, top = self:GetLeft(), self:GetTop()
-        if left and top then
-            local c = DB(); c.standaloneTimerPos = { x = left, y = top }
+        local c = DB()
+        if (c.standaloneTimerAnchor or "free") == "free" then
+            local left, top = self:GetLeft(), self:GetTop()
+            if left and top then c.standaloneTimerPos = { x = left, y = top } end
         end
     end)
 
@@ -3698,18 +3768,7 @@ local function CreateSATimer()
     ResizeToText()
     _saTimerFS:SetText("0:00")
 
-    -- Position: saved or default (above window 1, right-aligned)
-    local pos = cfg.standaloneTimerPos
-    if pos and pos.x and pos.y then
-        _saTimer:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
-    else
-        local W1 = _windows[1]
-        if W1 and W1.frame then
-            _saTimer:SetPoint("BOTTOMRIGHT", W1.frame, "TOPRIGHT", 0, 5)
-        else
-            _saTimer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        end
-    end
+    RepositionSATimer()
 
     _saTimer:Hide()  -- starts hidden; combat state controls visibility
 end
@@ -3725,6 +3784,7 @@ ns.ApplySATimer = function()
         local w = (_saTimerFS:GetStringWidth() or 30) + 4
         local h = (_saTimerFS:GetStringHeight() or 14) + 4
         _saTimer:SetSize(w, h)
+        RepositionSATimer()
         if _saTimerPreview then
             _saTimerFS:SetText("11:37")
         else
