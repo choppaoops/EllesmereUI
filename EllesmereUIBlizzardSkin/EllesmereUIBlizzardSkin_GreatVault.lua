@@ -740,11 +740,10 @@ local function RefreshActivityVisualState(frame, selectedActivity, theme)
 
     if frame.Progress then
         if activityState.isComplete then
-            -- Cache Blizzard's original difficulty text before we prepend ilvl
-            local d2 = GetFFD(frame)
-            if not d2._origDiffText then
-                d2._origDiffText = frame.Progress:GetText() or ""
-            end
+            -- Grab Blizzard's difficulty text, stripping our ilvl prefix if
+            -- we already modified it on a prior pass so it stays current.
+            local rawText = frame.Progress:GetText() or ""
+            local diffText = rawText:match("^%d+%s*%((.+)%)$") or rawText
             ApplyFont(frame.Progress, theme, STYLE.sizes.progress, complete.r, complete.g, complete.b, 1)
 
             local info = frame.info
@@ -756,7 +755,7 @@ local function RefreshActivityVisualState(frame, selectedActivity, theme)
                 end
             end
             if ilvl then
-                frame.Progress:SetText(ilvl .. " (" .. d2._origDiffText .. ")")
+                frame.Progress:SetText(ilvl .. " (" .. diffText .. ")")
             end
         else
             local progressColor = activityState.progressColor

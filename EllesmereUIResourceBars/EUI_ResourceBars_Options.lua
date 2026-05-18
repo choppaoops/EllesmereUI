@@ -5276,7 +5276,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "toggle", text = "Channel Ticks",
-              tooltip = "Damage tick marks on channeled spells. Only supported spells are shown — request missing spells on Discord.",
+              tooltip = "Shows tick marks on channeled spells. Only supported spells are shown, request missing spells on Discord.",
               disabled = marksOff,
               disabledTooltip = "Enable Tick Markers",
               getValue = function() local p = DB(); return p and p.castBar.showTickMarks end,

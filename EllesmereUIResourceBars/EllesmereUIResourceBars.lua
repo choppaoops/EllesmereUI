@@ -141,17 +141,38 @@ local PT = {
 --  is reworked or a new channeled spell is added, add a row here.
 -------------------------------------------------------------------------------
 local CHANNEL_TICK_DATA = {
-    [356995]  = { ticks = 4, modSpell = 1219723, modTicks = 5 },                   -- Disintegrate (Evoker) / Azure Celerity
-    [15407]   = { ticks = 6 },                                     -- Mind Flay (Shadow Priest)
-    [5143]    = { ticks = 5 },                                     -- Arcane Missiles (Arcane Mage)
-    [198013]  = { tickInterval = 0.2 },                             -- Eye Beam (Havoc DH) — haste extends duration
-    [473728]  = { tickInterval = 0.2 },                             -- Void Ray (Devourer DH) — haste extends duration
-    [212084]  = { ticks = 10 },                                    -- Fel Devastation (Vengeance DH)
-    [198590]  = { ticks = 5 },                                     -- Drain Soul (Affliction Warlock)
+    -- Evoker
+    [356995]  = { ticks = 4, modSpell = 1219723, modTicks = 5 },   -- Disintegrate / Azure Celerity
+    -- Priest
+    [15407]   = { ticks = 6 },                                     -- Mind Flay
+    [48045]   = { ticks = 6 },                                     -- Mind Sear
+    [64843]   = { ticks = 4 },                                     -- Divine Hymn
     [47757]   = { ticks = 3 },                                     -- Penance (Heal)
     [47758]   = { ticks = 3 },                                     -- Penance (DPS)
     [373129]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (DPS)
     [400171]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (Heal)
+    -- Mage
+    [5143]    = { ticks = 5 },                                     -- Arcane Missiles
+    [12051]   = { ticks = 6 },                                     -- Evocation
+    [205021]  = { ticks = 5 },                                     -- Ray of Frost
+    -- Druid
+    [740]     = { ticks = 4 },                                     -- Tranquility
+    -- Demon Hunter
+    [198013]  = { tickInterval = 0.2 },                            -- Eye Beam
+    [473728]  = { tickInterval = 0.2 },                            -- Void Ray (Devourer)
+    [212084]  = { ticks = 10 },                                    -- Fel Devastation
+    -- Warlock
+    [198590]  = { ticks = 5 },                                     -- Drain Soul
+    [755]     = { ticks = 5 },                                     -- Health Funnel
+    [234153]  = { ticks = 5 },                                     -- Drain Life
+    -- Death Knight
+    [206931]  = { ticks = 3 },                                     -- Blooddrinker
+    -- Monk
+    [113656]  = { ticks = 4 },                                     -- Fists of Fury
+    [115175]  = { ticks = 12 },                                     -- Soothing Mist
+    [443028]  = { ticks = 4 },                                     -- Celestial Conduit
+    -- Racial
+    [291944]  = { ticks = 6 },                                     -- Regeneratin (Zandalari)
 }
 
 

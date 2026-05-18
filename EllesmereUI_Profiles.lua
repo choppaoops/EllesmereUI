@@ -2065,3 +2065,44 @@ function EllesmereUI:ShowImportPopup(onImport)
     dimmer:Show()
     C_Timer.After(0.05, function() editBox:SetFocus() end)
 end
+
+-------------------------------------------------------------------------------
+--  Wago UI Packs API
+--  ExportProfile and ImportProfile already exist above with the right
+--  signatures. The functions below fill in the rest of the spec:
+--  https://github.com/methodgg/Wago-Creator-UI/blob/main/
+--  WagoUI_Libraries/LibAddonProfiles/ImplementationGuide.lua
+-------------------------------------------------------------------------------
+function EllesmereUI.DecodeProfileString(profileString)
+    local payload = EllesmereUI.DecodeImportString(profileString)
+    return payload and payload.data or nil
+end
+
+function EllesmereUI.SetProfile(profileKey)
+    EllesmereUI.SwitchProfile(profileKey)
+end
+
+function EllesmereUI.GetProfileKeys()
+    local _, profiles = EllesmereUI.GetProfileList()
+    local keys = {}
+    if profiles then
+        for k in pairs(profiles) do keys[k] = true end
+    end
+    return keys
+end
+
+function EllesmereUI.GetProfileAssignments()
+    return nil
+end
+
+function EllesmereUI.GetCurrentProfileKey()
+    return EllesmereUI.GetActiveProfileName()
+end
+
+function EllesmereUI.OpenConfig()
+    if not InCombatLockdown() then EllesmereUI:Show() end
+end
+
+function EllesmereUI.CloseConfig()
+    EllesmereUI:Hide()
+end

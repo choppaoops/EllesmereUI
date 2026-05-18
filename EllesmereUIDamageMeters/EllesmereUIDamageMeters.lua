@@ -1269,6 +1269,11 @@ end
 local _ttLastGUID, _ttLastSession, _ttLastSessionID, _ttLastDMType
 local _ttLastScale, _ttLastAnchor
 
+local function HideBarTooltip()
+    if _ttFrame then _ttFrame:Hide() end
+    _ttLastGUID = nil; _ttLastAnchor = nil
+end
+
 local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
 
     local cfg = DB()
@@ -1313,12 +1318,6 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
     else
         HideBarTooltip()
     end
-
-end
-
-local function HideBarTooltip()
-    if _ttFrame then _ttFrame:Hide() end
-    _ttLastGUID = nil; _ttLastAnchor = nil
 
 end
 

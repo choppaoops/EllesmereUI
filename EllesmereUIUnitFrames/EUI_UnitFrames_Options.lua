@@ -1496,7 +1496,7 @@ initFrame:SetScript("OnEvent", function(self)
         local cpPipContainer, cpPips
         if unitKey == "player" then
             local CLASS_POWER_MAP = {
-                ROGUE={5}, DRUID={[103]=5}, PALADIN={5}, MONK={5},
+                ROGUE={5}, DRUID={[103]=5,[104]=5,[105]=5}, PALADIN={5}, MONK={5},
                 WARLOCK={5}, MAGE={4}, EVOKER={5}, DEATHKNIGHT={6},
                 DEMONHUNTER={[581]=6, [1480]=5}, SHAMAN={[263]=10}, HUNTER={[255]=3}, WARRIOR={[72]=4},
             }

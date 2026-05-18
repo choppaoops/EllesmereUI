@@ -2213,13 +2213,38 @@ local function SetupBar(info, skipProtected)
                 end
                 -- Install childupdate so the action attr recalculates on
                 -- page changes. Base index baked into the snippet.
+                -- Empowered spell snippet: runs after the action attr updates
+                -- so pressAndHoldAction/typerelease match the new action.
+                -- IsPressHoldReleaseSpell and GetActionInfo are available in
+                -- the restricted environment even though they're gone from _G.
+                local empowerSnippet = [[
+                    local slot = self:GetAttribute('action')
+                    if slot and IsPressHoldReleaseSpell then
+                        local actionType, id, subType = GetActionInfo(slot)
+                        local spellID = nil
+                        if actionType == 'spell' then
+                            spellID = id
+                        elseif actionType == 'macro' and subType == 'spell' then
+                            spellID = id
+                        end
+                        if spellID and IsPressHoldReleaseSpell(spellID) then
+                            self:SetAttribute('pressAndHoldAction', true)
+                            self:SetAttribute('typerelease', 'actionrelease')
+                        else
+                            self:SetAttribute('pressAndHoldAction', false)
+                            if self:GetAttribute('typerelease') then
+                                self:SetAttribute('typerelease', nil)
+                            end
+                        end
+                    end
+                ]]
                 if key == "MainBar" and not btn:GetAttribute("_childupdate-eab-page") then
                     btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i))
+                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. empowerSnippet)
                 elseif frame._eabPagingInstalled
                        and not btn:GetAttribute("_childupdate-eab-page") then
                     btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i))
+                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. empowerSnippet)
                 end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
@@ -2380,6 +2405,7 @@ do
                             -- is nooped, so desaturation may not update. Explicit
                             -- usable refresh ensures correct visual state after
                             -- form/stance/talent changes.
+                            local canSetAttr = not InCombatLockdown()
                             for _, btn in ipairs(btns) do
                                 if btn.UpdateAction then btn:UpdateAction() end
                                 if not EFD(btn).rangeTinted then
@@ -4693,6 +4719,7 @@ function EAB:ApplyRangeColoring()
         _range.eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
         _range.eventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
         _range.eventFrame:RegisterEvent("ACTION_USABLE_CHANGED")
+        _range.eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
         _range.eventFrame:SetScript("OnEvent", function(_, event, slot, inRange, checksRange)
             if event == "ACTION_RANGE_CHECK_UPDATE" then
                 if not _range.slots[slot] then return end
@@ -4794,6 +4821,33 @@ function EAB:ApplyRangeColoring()
                         end
                     end
                 end
+            elseif event == "UPDATE_SHAPESHIFT_FORM" then
+                -- Form shifts can cause ACTION_RANGE_CHECK_UPDATE to fire
+                -- with stale data before Blizzard settles. Defer a manual
+                -- IsActionInRange poll to correct any wrong tints.
+                C_Timer_After(0, function()
+                    local bars = EAB.db.profile.bars
+                    for _, info in ipairs(BAR_CONFIG) do
+                        local s = bars[info.key]
+                        if s and s.outOfRangeColoring then
+                            local btns = barButtons[info.key]
+                            if btns then
+                                for _, btn in ipairs(btns) do
+                                    local sl = GetButtonActionSlot(btn)
+                                    if sl and HasAction(sl) then
+                                        local inRange = IsActionInRange(sl)
+                                        local isOut = (inRange == false)
+                                        _range.outOfRange[sl] = isOut or nil
+                                        ApplyRangeTint(btn, isOut, s)
+                                    else
+                                        if sl then _range.outOfRange[sl] = nil end
+                                        ApplyRangeTint(btn, false, s)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
             end
         end)
     end
@@ -6638,6 +6692,9 @@ local function UpdateKeybinds()
         end
     end
 end
+
+
+
 
 -- Update RegisterForClicks on all action buttons to match the CVar.
 -- Must be called out of combat (RegisterForClicks is protected).

@@ -1345,7 +1345,7 @@ local function ResolveGlowColor(ss)
             local cc = RAID_CLASS_COLORS[ct]
             if cc then return cc.r, cc.g, cc.b end
         end
-    elseif ss.glowColor == "custom" and ss.glowColorR then
+    elseif ss.glowColor == "custom" and ss.glowColorR ~= nil then
         return ss.glowColorR, ss.glowColorG or 0.788, ss.glowColorB or 0.137
     end
     return nil
@@ -1404,7 +1404,7 @@ local function ShowProcGlow(icon, cr, cg, cb)
                     local cc = RAID_CLASS_COLORS[ct]
                     if cc then cr, cg, cb = cc.r, cc.g, cc.b end
                 end
-            elseif ss.procGlowR then
+            elseif ss.procGlowR ~= nil then
                 cr, cg, cb = ss.procGlowR, ss.procGlowG or 0.788, ss.procGlowB or 0.137
             end
         end

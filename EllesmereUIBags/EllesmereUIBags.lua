@@ -1485,8 +1485,9 @@ local function UpdateCurrencyDisplays()
         local fullInfo = C_CurrencyInfo.GetCurrencyInfo(info.currencyTypesID)
         local icon = fullInfo and fullInfo.iconFileID or info.iconFileID
         local quantity = fullInfo and fullInfo.quantity or 0
+        local discovered = fullInfo and fullInfo.discovered
         local name = fullInfo and fullInfo.name or ""
-        if icon then
+        if icon and (discovered ~= false) then
             display:SetText("|T" .. tostring(icon) .. ":17:17:0:0:64:64:5:59:5:59|t " .. quantity)
             local itemWidth = display:GetStringWidth() + padding
             if currentX + itemWidth > leftOffset + availableWidth and currentX > leftOffset then
@@ -4497,7 +4498,6 @@ function EUI_Bags:RefreshInventory()
                         end
                         if #merged > 0 then
                             ApplySavedOrder(cat.groupName, merged)
-                            merged = MergeDuplicates(merged)
                         end
                         RenderSection(cat.groupName, merged, false)
                     end

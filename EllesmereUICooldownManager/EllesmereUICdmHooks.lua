@@ -682,7 +682,7 @@ local function DecorateFrame(frame, barData)
                 if isActive and hasGlow2 then
                     if fd.glowOverlay and not fd._activeGlowOn then
                         -- Unified glow color takes priority
-                        local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(ss2)
+                        local gr, gg, gb = ns.ResolveGlowColor(ss2)
                         if not gr then
                             if ss2.activeGlowClassColor then
                                 local _, ct = UnitClass("player")
@@ -885,7 +885,7 @@ local function DecorateFrame(frame, barData)
                     if not onCD then
                         if fd.glowOverlay and not fd._cdStateGlowOn then
                             local style = cse == "pixelGlowReady" and 1 or 3
-                            local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(ss2)
+                            local gr, gg, gb = ns.ResolveGlowColor(ss2)
                             ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
                             fd._cdStateGlowOn = true
                         end

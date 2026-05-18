@@ -4552,7 +4552,9 @@ end
 -------------------------------------------------------------------------------
 local CLASS_POWER_TYPES = {
     ROGUE       = Enum.PowerType.ComboPoints,
-    DRUID       = { [103] = Enum.PowerType.ComboPoints },  -- Feral only
+    DRUID       = { [103] = Enum.PowerType.ComboPoints,     -- Feral
+                    [104] = Enum.PowerType.ComboPoints,     -- Guardian (cat form)
+                    [105] = Enum.PowerType.ComboPoints },   -- Restoration (cat form)
     MAGE        = {
         [62] = { Enum.PowerType.ArcaneCharges, 4 }, -- Arcane
         [64] = { "ICICLES", 5 },                    -- Frost: aura-based pip stacks
@@ -5027,12 +5029,36 @@ local function CreateCustomClassPower(playerFrame, style)
         if powerType == Enum.PowerType.Runes then
             eventFrame:RegisterEvent("RUNE_POWER_UPDATE")
         end
+        -- Guardian/Resto druids: show combo points only in cat form
+        local druidFormToggle = false
+        if playerClass == "DRUID" and powerType == Enum.PowerType.ComboPoints then
+            local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
+            local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
+            if specID == 104 or specID == 105 then
+                druidFormToggle = true
+                eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+            end
+        end
         eventFrame:SetScript("OnEvent", function(_, event, unit)
+            if druidFormToggle and (event == "UPDATE_SHAPESHIFT_FORM" or event == "PLAYER_ENTERING_WORLD") then
+                local form = GetShapeshiftFormID and GetShapeshiftFormID() or 0
+                container:SetShown(form == 1)
+            end
             if event == "PLAYER_ENTERING_WORLD" or event == "RUNE_POWER_UPDATE"
                or (unit == "player") then
                 UpdatePips()
             end
         end)
+    end
+
+    -- For druid form-toggle specs, start hidden if not in cat form
+    if playerClass == "DRUID" and powerType == Enum.PowerType.ComboPoints then
+        local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
+        local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
+        if specID == 104 or specID == 105 then
+            local form = GetShapeshiftFormID and GetShapeshiftFormID() or 0
+            if form ~= 1 then container:Hide() end
+        end
     end
 
     UpdatePips()
