@@ -8,6 +8,7 @@ local PAGE_QOL      = "Quality of Life"
 local PAGE_CURSOR   = "Cursor"
 local PAGE_BREZ     = "BattleRes"
 local PAGE_AUTOLOG  = "Auto Logging"
+local PAGE_UPGCALC  = "Upgrade Calculator"
 
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -1138,8 +1139,8 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIQoL", {
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
-        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_BREZ, PAGE_AUTOLOG },
-        searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs" },
+        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_BREZ, PAGE_AUTOLOG, PAGE_UPGCALC },
+        searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs", "upgrade", "ilvl", "item level", "crest", "upgrade calculator" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_QOL then
                 return BuildQoLPage(pageName, parent, yOffset)
@@ -1152,6 +1153,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pageName == PAGE_AUTOLOG and _G._EUI_BuildAutoLoggingPage then
                 return _G._EUI_BuildAutoLoggingPage(pageName, parent, yOffset)
+            end
+            if pageName == PAGE_UPGCALC and _G._EUI_BuildUpgradeCalcPage then
+                return _G._EUI_BuildUpgradeCalcPage(pageName, parent, yOffset)
             end
         end,
         onReset = function()
@@ -1180,6 +1184,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.autoRepairGuild = false
             end
             EllesmereUIDB.autoLogging = nil
+            if _G._EUI_ResetUpgradeCalc then _G._EUI_ResetUpgradeCalc() end
             if _G._EBS_ResetCursor then _G._EBS_ResetCursor() end
             if EllesmereUI._applyHideBlizzardPartyFrame then EllesmereUI._applyHideBlizzardPartyFrame() end
             EllesmereUI:InvalidatePageCache()
