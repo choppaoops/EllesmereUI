@@ -7092,6 +7092,18 @@ local function ApplyBlizzCastbarState()
     end
 end
 
+-- Helper function based on the Blizzard UnitFrame_UpdateTooltip method
+-- without the Right-Click instruction line
+local function UnitFrame_CustomUpdateTooltip(self)
+    GameTooltip_SetDefaultAnchor(GameTooltip, self)
+    if GameTooltip:SetUnit(self.unit) then
+        GameTooltip:Show()
+        self.UpdateTooltip = UnitFrame_CustomUpdateTooltip
+    else
+        self.UpdateTooltip = nil
+    end
+end
+
 local function UnitFrame_OnEnter(self)
     local unit = self.unit
     if not unit then return end
@@ -7103,9 +7115,7 @@ local function UnitFrame_OnEnter(self)
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
         local showTooltip = not s or s.showUnitTooltip ~= false
         if showTooltip then
-            GameTooltip_SetDefaultAnchor(GameTooltip, self)
-            GameTooltip:SetUnit(unit)
-            GameTooltip:Show()
+            UnitFrame_CustomUpdateTooltip(self)
         end
     end
 end
