@@ -2220,8 +2220,8 @@ local function CollectAndReanchor()
     -- moved out of the default bars).
     if ns.MigrateSpecToBarFilterModelV6 then
         local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local prof = sa and sa.specProfiles and specKey and sa.specProfiles[specKey]
+        local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+        local prof = sp and specKey and sp[specKey]
         local needsMigration = prof and not prof._barFilterModelV6
         if needsMigration then
             local added = ns.MigrateSpecToBarFilterModelV6()
@@ -2240,8 +2240,8 @@ local function CollectAndReanchor()
     -- the revived entries become diversions.
     if ns.MergeDormantSpellsIntoAssigned then
         local specKey2 = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-        local sa2 = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local prof2 = sa2 and sa2.specProfiles and specKey2 and sa2.specProfiles[specKey2]
+        local sp2 = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+        local prof2 = sp2 and specKey2 and sp2[specKey2]
         if prof2 and not prof2._dormantMerged then
             ns.MergeDormantSpellsIntoAssigned()
             if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end

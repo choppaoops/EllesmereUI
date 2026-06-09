@@ -489,7 +489,12 @@ local DEFAULTS = {
 
 -------------------------------------------------------------------------------
 --  Dedicated spell assignment store helpers
---  Lives at EllesmereUIDB.spellAssignments, completely separate from profiles.
+--  Lives at EllesmereUIDB.spellAssignments. The spell/bar-content data is
+--  per-profile: spellAssignments.profiles[name].specProfiles[specKey]. It sits
+--  at the top level (NOT inside the profile blob), so it never travels with
+--  profile export or module sync, but it IS forked/dropped/moved alongside the
+--  profile itself (copy/delete/rename in EllesmereUI_Profiles.lua). The active
+--  profile's bucket is resolved live via ns.GetActiveSpecProfiles().
 --  Consolidated into a single local table to stay within Lua 5.1's 200 local
 --  variable limit for the main chunk.
 -------------------------------------------------------------------------------
@@ -498,13 +503,51 @@ local SpellStore = {}
 function SpellStore.Get()
     if not EllesmereUIDB then EllesmereUIDB = {} end
     if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {} }
+        EllesmereUIDB.spellAssignments = { profiles = {} }
     end
     return EllesmereUIDB.spellAssignments
 end
 
+-- Active profile name for the per-profile spell store. Read live so a profile
+-- switch auto-follows on the next CDM rebuild with no repoint step.
+function ns.GetActiveProfileName()
+    return (EllesmereUIDB and EllesmereUIDB.activeProfile) or "Default"
+end
+
+-- Per-profile spell store. Spell/bar-content data is owned by each profile, so
+-- copying a profile forks its CDM and deleting a bar never crosses profiles. It
+-- lives at spellAssignments.profiles[name].specProfiles -- OUTSIDE the profile
+-- blob and the export payload, so module sync and profile export never carry it
+-- (both operate on the profile's addons blob, not this store).
+--
+-- A one-time migration (cdm_per_profile_spell_store_v1) seeds every existing
+-- profile from the legacy shared spellAssignments.specProfiles. Until that
+-- completes (_perProfileSeeded), fork the legacy data on first access so a
+-- profile never reads empty during the early window (e.g. if the migration
+-- body errored and is retrying next session).
+function ns.GetSpecProfilesForProfile(profileName)
+    local sa = SpellStore.Get()
+    if not sa.profiles then sa.profiles = {} end
+    local bucket = sa.profiles[profileName]
+    if not bucket then
+        bucket = { specProfiles = {} }
+        if not sa._perProfileSeeded and type(sa.specProfiles) == "table" and next(sa.specProfiles) then
+            local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
+            if DeepCopy then bucket.specProfiles = DeepCopy(sa.specProfiles) end
+        end
+        sa.profiles[profileName] = bucket
+    end
+    if not bucket.specProfiles then bucket.specProfiles = {} end
+    return bucket.specProfiles
+end
+
+-- specProfiles table for the active profile (the live CDM bucket).
+function ns.GetActiveSpecProfiles()
+    return ns.GetSpecProfilesForProfile(ns.GetActiveProfileName())
+end
+
 function SpellStore.GetSpecProfiles()
-    return SpellStore.Get().specProfiles
+    return ns.GetActiveSpecProfiles()
 end
 
 -- (SpellStore.GetBarGlows removed -- Bar Glows disabled pending rewrite)
@@ -837,9 +880,9 @@ local function SaveCurrentSpecProfile()
     if not specProfiles[specKey] then specProfiles[specKey] = { barSpells = {} } end
     local prof = specProfiles[specKey]
 
-    -- Bar Glows and Tracked Buff Bars are stored directly in
-    -- specProfiles[specKey] (not in profile). No copying needed --
-    -- GetBarGlows() and GetTrackedBuffBars() read/write there directly.
+    -- Bar Glows and Tracked Buff Bars are stored in the active profile's
+    -- specProfiles[specKey] bucket. GetBarGlows() and GetTrackedBuffBars()
+    -- read/write there directly, so nothing extra to copy here.
 
     -- Snapshot visible icon counts for pre-sizing on next login
     ns.SaveCachedBarSizes()
@@ -6188,9 +6231,9 @@ SlashCmdList.CDMDBG = function()
         end
     end
     -- Check all currently assigned spells in cooldowns + utility + ghost
-    local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
     local sk = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-    local prof = sa and sa.specProfiles and sk and sa.specProfiles[sk]
+    local prof = sp and sk and sp[sk]
     if prof and prof.barSpells then
         for barKey, bs in pairs(prof.barSpells) do
             if bs and bs.assignedSpells then

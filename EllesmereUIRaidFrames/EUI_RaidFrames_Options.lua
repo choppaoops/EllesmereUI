@@ -167,10 +167,15 @@ initFrame:SetScript("OnEvent", function(self)
         mBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, 0.98)
         EllesmereUI.MakeBorder(menuFrame, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
 
+        -- Drag state (declared before OnShow so its OnUpdate can suppress the
+        -- click-away dismiss while a row is actively being dragged).
+        local dragRow, dsY, isDragging = nil, nil, false
+
         menuFrame:SetScript("OnShow", function(self)
             local sc = sortBtn:GetEffectiveScale() / UIParent:GetEffectiveScale()
             self:SetScale(sc)
             self:SetScript("OnUpdate", function(m)
+                if isDragging then return end  -- never dismiss mid-drag
                 if not sortBtn:IsMouseOver() and not m:IsMouseOver() then
                     if IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton") then m:Hide() end
                 end
@@ -270,10 +275,6 @@ initFrame:SetScript("OnEvent", function(self)
         insLine:SetHeight(2)
         insLine:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
         insLine:Hide()
-
-        local dragRow = nil   -- which row is being dragged
-        local dsY = nil       -- cursor Y at drag start
-        local isDragging = false
 
         for ci, cb in ipairs(roleItems) do
             local row = CreateFrame("Button", nil, menuFrame)
@@ -507,12 +508,13 @@ initFrame:SetScript("OnEvent", function(self)
     local healthTextOrder = { "none", "percent", "percentNoSign", "number", "numberPercent", "percentNumber" }
 
     local absorbStyleValues = {
-        ["none"]     = "None",
-        ["striped"]  = "Striped",
-        ["clean"]    = "Clean (Flat)",
-        ["blizzard"] = "Blizzard",
+        ["none"]            = "None",
+        ["striped"]         = "Striped",
+        ["stripedReversed"] = "Striped Reversed",
+        ["clean"]           = "Clean (Flat)",
+        ["blizzard"]        = "Blizzard",
     }
-    local absorbStyleOrder = { "none", "striped", "clean", "blizzard" }
+    local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard" }
 
     local growthValues = {
         DOWN  = "Down",
@@ -989,15 +991,17 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
             UpdateAbsorbSwatchVis()
         end
-        -- Inline cog: right-edge absorb rendering
+        -- Inline cog: absorb placement (overlay / right edge / left edge)
         do
             local rgn = absorbRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Absorb Rendering",
                 rows = {
-                    { type="toggle", label="Show Absorbs from Right Edge",
-                      get=function() return SVal("absorbFromRightEdge", false) end,
-                      set=function(v) SSet("absorbFromRightEdge", v) end },
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SVal("absorbEdgeMode", "overlay") end,
+                      set=function(v) SSet("absorbEdgeMode", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -1055,6 +1059,32 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
             UpdateHealAbsorbSwatchVis()
+        end
+        -- Inline cog: heal absorb placement (independent of shield absorb)
+        do
+            local rgn = healAbsorbRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Heal Absorb Rendering",
+                rows = {
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SVal("healAbsorbEdgeMode", "overlay") end,
+                      set=function(v) SSet("healAbsorbEdgeMode", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
         -- Row 5: Heal Prediction (+ color swatch) | Prediction Opacity
@@ -3309,6 +3339,53 @@ initFrame:SetScript("OnEvent", function(self)
             readRoles  = function() return db.profile.partyRoleOrder or db.profile.roleOrder or { "TANK", "HEALER", "DAMAGER" } end,
             writeRoles = function(ro) db.profile.partyRoleOrder = ro; PartyReloadAndUpdate() end,
         })
+
+        -- Inline cog next to Sort By: Prioritize Class toggle + drag-to-reorder
+        -- Class Order list (party only). The toggle disables the order list.
+        do
+            local rgn = pSortRow._rightRegion
+            -- Build the class list in saved order, always covering all 13 classes
+            -- (appends any missing/new classes from the default alphabetical order).
+            local function GetClassItems()
+                local def = ns._GetDefaultClassOrder()  -- also populates ns._classNameByToken
+                local names = ns._classNameByToken or {}
+                local saved = db.profile.partyClassOrder
+                local order, seen = {}, {}
+                if saved then
+                    for _, t in ipairs(saved) do
+                        if names[t] and not seen[t] then order[#order + 1] = t; seen[t] = true end
+                    end
+                end
+                for _, t in ipairs(def) do if not seen[t] then order[#order + 1] = t; seen[t] = true end end
+                local out = {}
+                for _, t in ipairs(order) do out[#out + 1] = { key = t, label = names[t] or t } end
+                return out
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Class Sorting",
+                rows = {
+                    { type = "toggle", label = "Prioritize Class",
+                      tooltip = "This will not override sorting by role",
+                      get = function() return db.profile.partyPrioritizeClass end,
+                      set = function(v) db.profile.partyPrioritizeClass = v; PartyReloadAndUpdate() end },
+                    { type = "reorder", label = "Class Order", hint = "Drag to Reorder Classes",
+                      items = GetClassItems,
+                      set = function(keys) db.profile.partyClassOrder = keys; PartyReloadAndUpdate() end,
+                      disabled = function() return not db.profile.partyPrioritizeClass end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
 
         -- Row 4: Self Position | Hide Self
         _, h = W:DualRow(parent, y,

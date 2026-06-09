@@ -895,8 +895,11 @@ function EllesmereUI.ApplyProfileData(profileData)
             local db = dbByFolder[entry.folder]
             if db then
                 local profile = db.profile
-                -- TBB and barGlows are spec-specific (in spellAssignments),
-                -- not in profile. No save/restore needed on profile switch.
+                -- CDM spell content (barSpells, TBB, barGlows) lives in the
+                -- per-profile store at spellAssignments.profiles[name], NOT in
+                -- this profile blob. No save/restore needed here: ImportProfile
+                -- sets the new profile's bucket directly, and on a profile switch
+                -- the live accessor + RefreshAllAddons rebuild pick it up.
                 for k in pairs(profile) do profile[k] = nil end
                 for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
                 -- Pre-split imports carry the shared totPet table but no
@@ -1593,6 +1596,24 @@ local function FixupImportedClassColors()
     end
 end
 
+-- Per-profile CDM spell store helpers.
+-- The CDM spell/bar-content store lives at
+-- EllesmereUIDB.spellAssignments.profiles[name].specProfiles -- a top-level
+-- table OUTSIDE the profile blob, so it never travels with profile export or
+-- module sync (both operate on the profile's addons blob). These helpers
+-- fork/move/drop a profile's CDM bucket in lockstep with the profile itself.
+-- Defined above ImportProfile so all profile-lifecycle functions can use it.
+local function GetSpellStoreProfiles()
+    if not EllesmereUIDB then return nil end
+    local sa = EllesmereUIDB.spellAssignments
+    if not sa then
+        sa = { profiles = {} }
+        EllesmereUIDB.spellAssignments = sa
+    end
+    if not sa.profiles then sa.profiles = {} end
+    return sa.profiles
+end
+
 --- Import a profile string. Returns: success, errorMsg
 --- The caller must provide a name for the new profile.
 function EllesmereUI.ImportProfile(importStr, profileName)
@@ -1708,10 +1729,30 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if not found then
             table.insert(db.profileOrder, 1, profileName)
         end
-        -- CDM spell assignments are NOT written here. The caller shows
-        -- a spec picker popup that lets the user choose which specs to
-        -- import, then calls ApplyImportedSpecProfiles() with only the
-        -- selected specs. Writing here would bypass that selection.
+        -- Per-profile CDM spell store. The export payload never carries CDM
+        -- spell content (it is stripped above and lives outside the profile
+        -- blob), so set the new profile's bucket by intent:
+        --   * import string INCLUDED the CDM module -> empty bucket, so the
+        --     default cooldown/utility/buff bars get the spec's default
+        --     population and any imported custom-bar shells stay empty.
+        --   * import OMITTED CDM (subset/merge import) -> fork the current
+        --     profile's bucket so its spell allocations carry over unchanged.
+        -- Done BEFORE the specLocked early-return so locked-spec imports still
+        -- get a bucket. db.activeProfile is still the source profile here (it is
+        -- repointed to profileName below), so forking from it is correct.
+        do
+            local profiles = GetSpellStoreProfiles()
+            if profiles then
+                local cdmIncluded = payload.data and payload.data.addons
+                    and payload.data.addons["EllesmereUICooldownManager"] ~= nil
+                if cdmIncluded then
+                    profiles[profileName] = { specProfiles = {} }
+                else
+                    local cur = profiles[db.activeProfile or "Default"]
+                    profiles[profileName] = cur and DeepCopy(cur) or { specProfiles = {} }
+                end
+            end
+        end
         -- Remove the new profile from all sync targets so the pre-logout
         -- sync doesn't overwrite it. Other profiles' sync relationships
         -- are preserved (per-profile sync system).
@@ -1872,6 +1913,18 @@ function EllesmereUI.SaveCurrentAsProfile(name)
         phantomBounds = DeepCopy(EllesmereUIDB.phantomBounds     or {}),
     }
     db.profiles[name] = copy
+    -- Fork the source profile's CDM spell store so the copy owns an independent
+    -- set of cooldown/bar spell assignments. The store lives outside the profile
+    -- blob, so the DeepCopy(src) above did not carry it; without this fork the
+    -- copy would share the origin's spec buckets and deleting a bar in the copy
+    -- would wipe the origin (the reported bug).
+    do
+        local profiles = GetSpellStoreProfiles()
+        if profiles then
+            local srcBucket = profiles[current]
+            profiles[name] = srcBucket and DeepCopy(srcBucket) or { specProfiles = {} }
+        end
+    end
     local found = false
     for _, n in ipairs(db.profileOrder) do
         if n == name then found = true; break end
@@ -1931,6 +1984,11 @@ function EllesmereUI.DeleteProfile(name)
     for specID, pName in pairs(db.specProfiles) do
         if pName == name then db.specProfiles[specID] = nil end
     end
+    -- Drop the profile's CDM spell store bucket so it doesn't linger.
+    do
+        local profiles = GetSpellStoreProfiles()
+        if profiles then profiles[name] = nil end
+    end
     -- Clean up sync targets: remove deleted profile from every module's list
     if EllesmereUIDB.syncedModules then
         for folder, targets in pairs(EllesmereUIDB.syncedModules) do
@@ -1957,6 +2015,14 @@ function EllesmereUI.RenameProfile(oldName, newName)
     if not db.profiles[oldName] then return end
     db.profiles[newName] = db.profiles[oldName]
     db.profiles[oldName] = nil
+    -- Move the profile's CDM spell store bucket to the new name.
+    do
+        local profiles = GetSpellStoreProfiles()
+        if profiles and profiles[oldName] ~= nil then
+            profiles[newName] = profiles[oldName]
+            profiles[oldName] = nil
+        end
+    end
     for i, n in ipairs(db.profileOrder) do
         if n == oldName then db.profileOrder[i] = newName; break end
     end

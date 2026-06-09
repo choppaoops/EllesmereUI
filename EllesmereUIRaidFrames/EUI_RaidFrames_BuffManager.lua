@@ -93,6 +93,26 @@ local ORIENT_ORDER = { "HORIZONTAL", "VERTICAL" }
 local SHOW_WHEN_VALUES = { present = "When Present", missing = "When Missing" }
 local SHOW_WHEN_ORDER = { "present", "missing" }
 
+-- Indicator frame level (layering relative to the unit button). For Icon/Square
+-- the indicator's own border sits at base + 1 and its count/duration text carrier
+-- is pinned at +18 regardless of mode. Bars use the base only (no sub-frames).
+local FRAMELVL_VALUES = {
+    behindBorders = "Behind Borders",
+    behindText    = "Behind Text",
+    medium        = "Medium",
+    high          = "High",
+    highest       = "Highest",
+}
+local FRAMELVL_ORDER = { "behindBorders", "behindText", "medium", "high", "highest" }
+local FRAMELVL_BASE = {
+    behindBorders = 7,   -- below the main border (+8)
+    behindText    = 11,  -- below the name/health text carrier (+12), above borders
+    medium        = 13,  -- ns.LVL_AURA: the original/default band
+    high          = 14,
+    highest       = 15,
+}
+local FRAMELVL_TEXT = 18  -- fixed count/duration text-carrier offset (icon/square)
+
 -------------------------------------------------------------------------------
 --  Healer spell database
 --  Spells marked secret = true are identified
@@ -483,6 +503,7 @@ local function NewIndicator(indType, spells)
         ind.indBorderSize    = 1
         ind.indBorderColor   = { r = 0, g = 0, b = 0 }
         ind.hideIcon         = false
+        ind.frameLevel       = "medium"
         ind.growDirection    = "RIGHT"
         ind.spacing          = 0
     elseif indType == "square" then
@@ -491,13 +512,18 @@ local function NewIndicator(indType, spells)
         ind.color = { r = 0x0C/255, g = 0xD2/255, b = 0x9D/255 }
         ind.indBorderSize    = 1
         ind.indBorderColor   = { r = 0, g = 0, b = 0 }
+        ind.frameLevel    = "medium"
         ind.growDirection = "RIGHT"
         ind.spacing      = 0
     elseif indType == "bar" then
         ind.ownOnly          = true
         ind.color = { r = 0x0C/255, g = 0xD2/255, b = 0x9D/255 }
+        ind.barColorOpacity = 100
+        ind.frameLevel = "behindBorders"
         ind.barWidth  = 30
         ind.barHeight = 4
+        ind.barFullWidth = false
+        ind.barFullHeight = false
         ind.orientation = "HORIZONTAL"
         ind.reverseFill = false
         ind.barBgOpacity = 50
@@ -512,6 +538,7 @@ local function NewIndicator(indType, spells)
         local _ac = EllesmereUI and EllesmereUI.ACCENT_COLOR
         ind.color       = _ac and { r = _ac.r, g = _ac.g, b = _ac.b } or { r = 0.05, g = 0.82, b = 0.62 }
         ind.borderWidth = 2
+        ind.borderOpacity = 100
         ind.showWhen    = "present"
     elseif indType == "framealpha" then
         ind.ownOnly          = true
@@ -754,6 +781,7 @@ function ns.BM_CreateIndicators(button, health, d, PP)
         local textCarrier = CreateFrame("Frame", nil, f)
         textCarrier:SetAllPoints()
         textCarrier:SetFrameLevel(f:GetFrameLevel() + 5)
+        f._textCarrier = textCarrier
 
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
@@ -918,6 +946,168 @@ end
 
 local function ClearBarDrain(bar)
     bar:Hide()
+end
+
+-- Size + anchor a bar indicator relative to its unit's health bar. Shared by
+-- the live and preview renders so they stay a 1:1 replica. When Full Width /
+-- Full Height are off it uses the slider size at the indicator's anchor point.
+-- When on, it edge-pins to the health bar so the bar matches it pixel-for-pixel
+-- on that axis; the indicator's anchor still drives placement on the free axis.
+local function BM_PlaceBar(bar, health, ind, iscale)
+    local w = ind.barWidth or 30
+    local h = ind.barHeight or 4
+    local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
+    bar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+    bar:ClearAllPoints()
+    -- Full Width/Height follow the fill axis like barWidth/barHeight: when the
+    -- bar is vertical they swap which screen edge they span, so the toggle whose
+    -- label reads "Full Width" always spans the on-screen horizontal axis.
+    -- (Explicit if/else, not `a and b or c` -- the values are booleans.)
+    local fullW, fullH
+    if isVert then
+        fullW, fullH = ind.barFullHeight, ind.barFullWidth
+    else
+        fullW, fullH = ind.barFullWidth, ind.barFullHeight
+    end
+    if fullW and fullH then
+        -- Exact overlay of the health bar.
+        bar:SetAllPoints(health)
+    elseif fullW then
+        -- Span the health bar's full width; thickness from the cross-axis
+        -- slider; vertical placement follows the indicator's vertical edge.
+        local pos = ind.position or "TOPLEFT"
+        local vEdge = (pos:find("BOTTOM", 1, true) and "BOTTOM")
+            or (pos:find("TOP", 1, true) and "TOP") or ""
+        local oy = (ind.offsetY or 0) * iscale
+        bar:SetPoint(vEdge .. "LEFT", health, vEdge .. "LEFT", 0, oy)
+        bar:SetPoint(vEdge .. "RIGHT", health, vEdge .. "RIGHT", 0, oy)
+        bar:SetHeight(isVert and w or h)
+    elseif fullH then
+        -- Span the health bar's full height; thickness from the cross-axis
+        -- slider; horizontal placement follows the indicator's horizontal edge.
+        local pos = ind.position or "TOPLEFT"
+        local hEdge = (pos:find("RIGHT", 1, true) and "RIGHT")
+            or (pos:find("LEFT", 1, true) and "LEFT") or ""
+        local ox = (ind.offsetX or 0) * iscale
+        bar:SetPoint("TOP" .. hEdge, health, "TOP" .. hEdge, ox, 0)
+        bar:SetPoint("BOTTOM" .. hEdge, health, "BOTTOM" .. hEdge, ox, 0)
+        bar:SetWidth(isVert and h or w)
+    else
+        if isVert then bar:SetSize(h, w) else bar:SetSize(w, h) end
+        bar:SetPoint(ind.position or "TOPLEFT", health, ind.position or "TOPLEFT",
+                     (ind.offsetX or 0) * iscale, (ind.offsetY or 0) * iscale)
+    end
+end
+
+-- Re-level a pooled icon/square frame for its indicator's Frame Level mode.
+-- The indicator's own border sits at base + 1; its count/duration text carrier
+-- stays pinned at +18 regardless of mode. baseLvl = the unit button's level.
+-- Called on every assignment because pool frames are reused across indicators
+-- that may each pick a different mode.
+local function BM_ApplyIconLevel(fr, ind, baseLvl)
+    local off = FRAMELVL_BASE[ind.frameLevel or "medium"] or FRAMELVL_BASE.medium
+    fr:SetFrameLevel(baseLvl + off)
+    -- Swipe + border ride one above the icon; text carrier stays pinned on top.
+    -- Set each explicitly rather than relying on child-level propagation.
+    if fr._cooldown then fr._cooldown:SetFrameLevel(baseLvl + off + 1) end
+    if fr._bdr then fr._bdr:SetFrameLevel(baseLvl + off + 1) end
+    if fr._textCarrier then fr._textCarrier:SetFrameLevel(baseLvl + FRAMELVL_TEXT) end
+end
+
+-- Bars have no border/text sub-frames, so only the base applies. Bars default
+-- to "Behind Borders" (a bar with no saved mode adopts that default).
+local function BM_ApplyBarLevel(bar, ind, baseLvl)
+    bar:SetFrameLevel(baseLvl + (FRAMELVL_BASE[ind.frameLevel or "behindBorders"] or FRAMELVL_BASE.behindBorders))
+end
+
+-------------------------------------------------------------------------------
+--  Threshold "expiring soon" recolor -- secret-value-safe via C_CurveUtil.
+--  A Step color curve maps remaining-seconds -> { threshold color below the set
+--  seconds, normal color at/above }. WoW evaluates it C-side against the aura's
+--  opaque DurationObject and hands back a Color object whose channels may be
+--  SECRET -- we never read them, only pass GetRGBA() straight into a secret-safe
+--  setter. Works on fingerprinted private auras (the instance ID is readable;
+--  only the spell ID is secret). A shared ~4 FPS ticker re-applies as time
+--  crosses the threshold; zero cost when nothing is registered.
+-------------------------------------------------------------------------------
+local _thresholdCurves = {}  -- [configHash] = color curve (rebuilt only on config change)
+local function GetThresholdColorCurve(thresholdSec, ncR, ncG, ncB, ncA, tcR, tcG, tcB, tcA)
+    if not (C_CurveUtil and C_CurveUtil.CreateColorCurve and Enum and Enum.LuaCurveType) then return nil end
+    local hash = string.format("%d|%.3f,%.3f,%.3f,%.3f|%.3f,%.3f,%.3f,%.3f",
+        thresholdSec, ncR, ncG, ncB, ncA, tcR, tcG, tcB, tcA)
+    local curve = _thresholdCurves[hash]
+    if curve then return curve end
+    curve = C_CurveUtil.CreateColorCurve()
+    curve:SetType(Enum.LuaCurveType.Step)
+    curve:AddPoint(0, CreateColor(tcR, tcG, tcB, tcA))            -- remaining < threshold
+    curve:AddPoint(thresholdSec, CreateColor(ncR, ncG, ncB, ncA)) -- remaining >= threshold
+    curve:AddPoint(600, CreateColor(ncR, ncG, ncB, ncA))          -- 10-min cap
+    _thresholdCurves[hash] = curve
+    return curve
+end
+
+-- [element] = { unit, iid, curve, apply }; apply(element, colorResult)
+local thresholdRegistry = {}
+local thresholdTicker = CreateFrame("Frame")
+thresholdTicker:Hide()
+local thresholdElapsed = 0
+local function EvalThreshold(element, e)
+    if not C_UnitAuras_GetAuraDuration then return end
+    local durObj = C_UnitAuras_GetAuraDuration(e.unit, e.iid)
+    if durObj and durObj.EvaluateRemainingDuration then
+        -- pcall: the API can throw on a stale/invalid duration object mid-recycle.
+        local ok, result = pcall(durObj.EvaluateRemainingDuration, durObj, e.curve)
+        if ok and result and result.GetRGBA then
+            e.apply(element, result)   -- result channels may be secret; never read here
+        end
+    end
+end
+thresholdTicker:SetScript("OnUpdate", function(_, dt)
+    thresholdElapsed = thresholdElapsed + dt
+    if thresholdElapsed < 0.25 then return end
+    thresholdElapsed = 0
+    local any = false
+    for element, e in pairs(thresholdRegistry) do
+        if element.IsShown and not element:IsShown() then
+            thresholdRegistry[element] = nil   -- self-prune hidden / recycled pool frames
+        else
+            any = true
+            EvalThreshold(element, e)
+        end
+    end
+    if not any then thresholdTicker:Hide() end
+end)
+
+local function RegisterThreshold(element, unit, iid, curve, apply)
+    local e = thresholdRegistry[element]
+    if not e then e = {}; thresholdRegistry[element] = e end
+    e.unit, e.iid, e.curve, e.apply = unit, iid, curve, apply
+    thresholdTicker:Show()
+    EvalThreshold(element, e)   -- immediate, so we never flash the normal color for a tick
+end
+
+local function UnregisterThreshold(element)
+    thresholdRegistry[element] = nil
+end
+
+-- Per-type apply helpers. All push the (possibly secret) curve color straight
+-- into a secret-safe setter via GetRGBA() -- the channels are never read.
+local function ApplyBarThresholdColor(bar, colorResult)
+    bar:SetStatusBarColor(colorResult:GetRGBA())
+end
+-- Icon/Square: the pool frame is the element; its texture carries the color.
+local function ApplyTexThresholdColor(f, colorResult)
+    if f._tex then f._tex:SetVertexColor(colorResult:GetRGBA()) end
+end
+-- Health-color overlay: the overlay texture itself is the element.
+local function ApplyOverlayThresholdColor(overlay, colorResult)
+    overlay:SetVertexColor(colorResult:GetRGBA())
+end
+-- Frame-border effect: PP.SetBorderColor only forwards to SetVertexColor on the
+-- border textures (no arithmetic), so a secret color is safe.
+local function ApplyBorderThresholdColor(borderFrame, colorResult)
+    local PP2 = EllesmereUI.PanelPP or EllesmereUI.PP
+    if PP2 and PP2.SetBorderColor then PP2.SetBorderColor(borderFrame, colorResult:GetRGBA()) end
 end
 
 -------------------------------------------------------------------------------
@@ -1266,6 +1456,8 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
 
     -- Party buttons use the party scale (Auto Resize); raid buttons use theirs.
     local iscale = (d._isParty and ns._partyIndicatorScale or ns._indicatorScale) or 1
+    -- Base level for the Frame Level setting (re-applied per indicator below).
+    local buttonLvl = button:GetFrameLevel()
 
     if not UnitExists(unit) then
         ns.BM_ClearIndicators(button)
@@ -1436,19 +1628,10 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                     barPoolIdx = barPoolIdx + 1
                     local bar = d.bmBarPool[barPoolIdx]
                     if bar then
-                        local w = ind.barWidth or 30
-                        local h = ind.barHeight or 4
-                        local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
-                        if isVert then
-                            bar:SetOrientation("VERTICAL")
-                            bar:SetSize(h, w)
-                        else
-                            bar:SetOrientation("HORIZONTAL")
-                            bar:SetSize(w, h)
-                        end
+                        BM_ApplyBarLevel(bar, ind, buttonLvl)
                         bar:SetReverseFill(ind.reverseFill or false)
                         local c = ind.color or { r=0, g=1, b=0 }
-                        bar:SetStatusBarColor(c.r, c.g, c.b, 1)
+                        bar:SetStatusBarColor(c.r, c.g, c.b, (ind.barColorOpacity or 100) / 100)
                         -- Background
                         if bar._bg then
                             local bgc = ind.barBgColor or { r=0, g=0, b=0 }
@@ -1463,9 +1646,25 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                         else
                             ApplyBarDrain(bar, unit, iid, nil, nil)
                         end
-                        bar:ClearAllPoints()
-                        bar:SetPoint(ind.position or "TOPLEFT", health, ind.position or "TOPLEFT",
-                                     (ind.offsetX or 0) * iscale, (ind.offsetY or 0) * iscale)
+                        -- Threshold "expiring" recolor (secret-safe curve + ticker).
+                        -- While enabled the ticker owns the bar color and reverts to
+                        -- the normal color above the threshold; the immediate eval in
+                        -- RegisterThreshold avoids a one-tick flash of the normal color.
+                        if ind.thresholdEnabled and iid and not issecretvalue(iid) then
+                            local tc = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
+                            local curve = GetThresholdColorCurve(
+                                ind.threshold or 3,
+                                c.r, c.g, c.b, (ind.barColorOpacity or 100) / 100,
+                                tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
+                            if curve then
+                                RegisterThreshold(bar, unit, iid, curve, ApplyBarThresholdColor)
+                            else
+                                UnregisterThreshold(bar)
+                            end
+                        else
+                            UnregisterThreshold(bar)
+                        end
+                        BM_PlaceBar(bar, health, ind, iscale)
                         bar:Show()
                     end
                 end
@@ -1500,6 +1699,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                         iconPoolIdx = iconPoolIdx + 1
                         local f = d.bmIconPool[iconPoolIdx]
                         if f then
+                            BM_ApplyIconLevel(f, ind, buttonLvl)
                             -- Per-spell size offset (right-click in preview): base
                             -- size + this spell's offset, clamped to >= 1px.
                             local soff = ind.sizeOffsets and ind.sizeOffsets[sid] or 0
@@ -1548,6 +1748,9 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                             -- Icon opacity (affects texture + swipe, not text)
                             local iconAlpha = hideIcon and 0 or (ind.iconOpacity or 100) / 100
 
+                            -- Normal color the threshold curve reverts to above the
+                            -- cutoff: white tint for icons, the square's own color.
+                            local ncR, ncG, ncB, ncA
                             if indType == "icon" then
                                 local icon = aura.icon
                                 if icon and not issecretvalue(icon) then
@@ -1557,13 +1760,36 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 end
                                 f._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                                 f._tex:SetVertexColor(1, 1, 1, iconAlpha)
+                                ncR, ncG, ncB, ncA = 1, 1, 1, iconAlpha
                             else -- square
                                 -- Per-ability color: this spell's own color, falling
                                 -- back to the legacy single ind.color, then default.
                                 local c = (ind.spellColors and ind.spellColors[sid])
                                     or ind.color or { r=0, g=1, b=0 }
-                                f._tex:SetColorTexture(c.r, c.g, c.b, iconAlpha)
+                                -- White texture + vertex color (not SetColorTexture) so the
+                                -- threshold can recolor via secret-safe SetVertexColor, and a
+                                -- reused icon's tint can't leak through.
+                                f._tex:SetColorTexture(1, 1, 1, 1)
+                                f._tex:SetVertexColor(c.r, c.g, c.b, iconAlpha)
                                 f._tex:SetTexCoord(0, 1, 0, 1)
+                                ncR, ncG, ncB, ncA = c.r, c.g, c.b, iconAlpha
+                            end
+                            -- Threshold expiring recolor (secret-safe curve + ticker)
+                            do
+                                local tiid = aura.auraInstanceID
+                                if ind.thresholdEnabled and tiid and not issecretvalue(tiid) then
+                                    local tc = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
+                                    local curve = GetThresholdColorCurve(
+                                        ind.threshold or 3, ncR, ncG, ncB, ncA,
+                                        tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
+                                    if curve then
+                                        RegisterThreshold(f, unit, tiid, curve, ApplyTexThresholdColor)
+                                    else
+                                        UnregisterThreshold(f)
+                                    end
+                                else
+                                    UnregisterThreshold(f)
+                                end
                             end
 
                             -- Stack count (secret-safe via Blizzard API)
@@ -1639,27 +1865,56 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
         else
             -- Frame effects
             local anyPresent = false
+            local presentAura = nil
             for _, sid in ipairs(ind.spells) do
-                if GetAura(sid) then anyPresent = true; break end
+                local a = GetAura(sid)
+                if a then anyPresent = true; presentAura = a; break end
             end
 
             local showWhen = ind.showWhen or "present"
             local shouldShow = (showWhen == "present" and anyPresent)
                             or (showWhen == "missing" and not anyPresent)
 
+            -- Threshold drives off the first present tracked aura (present mode
+            -- only -- a missing aura has no remaining time to watch). Secret-safe.
+            local presentIid
+            if showWhen == "present" and presentAura then presentIid = presentAura.auraInstanceID end
+            local threshOK = ind.thresholdEnabled and presentIid and not issecretvalue(presentIid)
+
             if shouldShow then
                 if indType == "healthcolor" then
                     if d.bmHCOverlay then
                         local c = ind.color or { r=0, g=1, b=0 }
-                        d.bmHCOverlay:SetColorTexture(c.r, c.g, c.b, (ind.opacity or 100) / 100)
+                        local op = (ind.opacity or 100) / 100
+                        -- White texture + vertex so the threshold can recolor via
+                        -- secret-safe SetVertexColor.
+                        d.bmHCOverlay:SetColorTexture(1, 1, 1, 1)
+                        d.bmHCOverlay:SetVertexColor(c.r, c.g, c.b, op)
                         d.bmHCOverlay:Show()
+                        local curve
+                        if threshOK then
+                            local tc = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
+                            curve = GetThresholdColorCurve(ind.threshold or 3,
+                                c.r, c.g, c.b, op, tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
+                        end
+                        if curve then RegisterThreshold(d.bmHCOverlay, unit, presentIid, curve, ApplyOverlayThresholdColor)
+                        else UnregisterThreshold(d.bmHCOverlay) end
                     end
                 elseif indType == "border" then
                     if d.bmEffectBorder and PP then
                         local c = ind.color or { r=0, g=1, b=0 }
+                        local op = (ind.borderOpacity or 100) / 100
                         local bw = ind.borderWidth or 2
-                        PP.UpdateBorder(d.bmEffectBorder, bw, c.r, c.g, c.b, 1)
+                        PP.UpdateBorder(d.bmEffectBorder, bw, c.r, c.g, c.b, op)
                         d.bmEffectBorder:Show()
+                        local curve
+                        if threshOK then
+                            local tc = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
+                            curve = GetThresholdColorCurve(ind.threshold or 3,
+                                c.r, c.g, c.b, op, tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
+                        end
+                        if curve then RegisterThreshold(d.bmEffectBorder, unit, presentIid, curve, ApplyBorderThresholdColor)
+                        else UnregisterThreshold(d.bmEffectBorder) end
                     end
                 elseif indType == "framealpha" then
                     local bmA = ind.alpha or 0.4
@@ -1841,6 +2096,7 @@ function ns.BM_CreatePreviewIndicators(f, health, PP)
         textCarrier:SetAllPoints()
         textCarrier:SetFrameLevel(fr:GetFrameLevel() + 5)
         textCarrier:EnableMouse(false)
+        fr._textCarrier = textCarrier
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", fr, "BOTTOMRIGHT", 1, -1)
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
@@ -1954,6 +2210,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
     local health = f._health
     if not health then return end
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
+    -- Base level for the Frame Level setting (mirrors the live render).
+    local pvBaseLvl = f:GetFrameLevel()
 
     -- Show only the selected spec's indicators
     local iPoolIdx = 0
@@ -1980,7 +2238,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                             elseif indType == "border" and f._bmEffectBorder and PP then
                                 local c = ind.color or { r=0, g=1, b=0 }
                                 local bw = ind.borderWidth or 2
-                                PP.UpdateBorder(f._bmEffectBorder, bw, c.r, c.g, c.b, 1)
+                                PP.UpdateBorder(f._bmEffectBorder, bw, c.r, c.g, c.b, (ind.borderOpacity or 100) / 100)
                                 f._bmEffectBorder:Show()
                             elseif indType == "framealpha" then
                                 f:SetAlpha(ind.alpha or 0.4)
@@ -1993,19 +2251,10 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                             bPoolIdx = bPoolIdx + 1
                             local bar = barPool and barPool[bPoolIdx]
                             if bar then
-                                local w = ind.barWidth or 30
-                                local h = ind.barHeight or 4
-                                local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
-                                if isVert then
-                                    bar:SetOrientation("VERTICAL")
-                                    bar:SetSize(h, w)
-                                else
-                                    bar:SetOrientation("HORIZONTAL")
-                                    bar:SetSize(w, h)
-                                end
+                                BM_ApplyBarLevel(bar, ind, pvBaseLvl)
                                 bar:SetReverseFill(ind.reverseFill or false)
                                 local c = ind.color or { r=0, g=1, b=0 }
-                                bar:SetStatusBarColor(c.r, c.g, c.b, 1)
+                                bar:SetStatusBarColor(c.r, c.g, c.b, (ind.barColorOpacity or 100) / 100)
                                 if bar._bg then
                                     local bgc = ind.barBgColor or { r=0, g=0, b=0 }
                                     bar._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (ind.barBgOpacity or 50) / 100)
@@ -2016,9 +2265,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                 else
                                     bar:SetValue(1)
                                 end
-                                bar:ClearAllPoints()
-                                bar:SetPoint(ind.position or "TOPLEFT", health, ind.position or "TOPLEFT",
-                                             (ind.offsetX or 0) * iscale, (ind.offsetY or 0) * iscale)
+                                BM_PlaceBar(bar, health, ind, iscale)
                                 bar._bmIndId = ind.id
                                 bar:Show()
                             end
@@ -2049,6 +2296,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                 iPoolIdx = iPoolIdx + 1
                                 local fr = iconPool[iPoolIdx]
                                 if fr then
+                                    BM_ApplyIconLevel(fr, ind, pvBaseLvl)
                                     -- Per-spell size offset (right-click to set):
                                     -- base size + this spell's offset, clamped >= 1px.
                                     local soff = ind.sizeOffsets and ind.sizeOffsets[sid] or 0
@@ -2091,6 +2339,10 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                         -- color, then legacy ind.color, then default.
                                         local c = (ind.spellColors and ind.spellColors[sid])
                                             or ind.color or { r=0, g=1, b=0 }
+                                        -- Reset vertex first (see live render): a frame
+                                        -- reused from an icon can carry a faded vertex
+                                        -- tint that would blank the square.
+                                        fr._tex:SetVertexColor(1, 1, 1, 1)
                                         fr._tex:SetColorTexture(c.r, c.g, c.b, 1)
                                         fr._tex:SetTexCoord(0, 1, 0, 1)
                                     end
@@ -3881,13 +4133,97 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
     --     container offset = -(CONTENT_PAD - PAD)
     local contentPad = EllesmereUI.CONTENT_PAD or 45
     local padDiff = contentPad - PAD
-    local settingsArea = CreateFrame("Frame", nil, root)
-    settingsArea:SetSize(leftW + padDiff * 2, max(10, visibleH - fixedH))
-    settingsArea:SetPoint("TOPLEFT", leftFixed, "BOTTOMLEFT", -padDiff, 0)
-    settingsArea:SetFrameLevel(root:GetFrameLevel() + 1)
+    local viewportH = max(10, visibleH - fixedH)
+    local settingsW = leftW + padDiff * 2
 
-    -- From here, DualRows build inside settingsArea
-    leftFrame = settingsArea
+    -- Smooth-scrolling viewport (mirrors the main options page). Rows build into
+    -- the scroll child; its height + the scrollbar are sized to the content after
+    -- building. The OnUpdate smooth frame is a child of root, so it stops when the
+    -- page is rebuilt (the old root is hidden).
+    local settingsScroll = CreateFrame("ScrollFrame", nil, root)
+    -- +5 raises the settings panel (CORE section first) 5px into the fixed area's
+    -- bottom spacing, tightening the gap above the CORE header for every indicator.
+    settingsScroll:SetPoint("TOPLEFT", leftFixed, "BOTTOMLEFT", -padDiff, 5)
+    settingsScroll:SetSize(settingsW, viewportH)
+    settingsScroll:SetFrameLevel(root:GetFrameLevel() + 1)
+    settingsScroll:SetClipsChildren(true)
+
+    local settingsChild = CreateFrame("Frame", nil, settingsScroll)
+    settingsChild:SetSize(settingsW, viewportH)
+    settingsScroll:SetScrollChild(settingsChild)
+
+    -- Scrollbar: thin track + thumb at the viewport's right edge (shown only on overflow).
+    local SBAR_W = 5
+    local sbTrack = CreateFrame("Frame", nil, settingsScroll)
+    sbTrack:SetPoint("TOPRIGHT", settingsScroll, "TOPRIGHT", -31, -12)
+    sbTrack:SetPoint("BOTTOMRIGHT", settingsScroll, "BOTTOMRIGHT", -31, 12)
+    sbTrack:SetWidth(SBAR_W)
+    sbTrack:SetFrameLevel(settingsScroll:GetFrameLevel() + 20)
+    do local t = sbTrack:CreateTexture(nil, "BACKGROUND"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.05) end
+    local sbThumb = CreateFrame("Frame", nil, sbTrack)
+    sbThumb:SetWidth(SBAR_W); sbThumb:SetHeight(30)
+    sbThumb:SetPoint("TOP", sbTrack, "TOP", 0, 0)
+    sbThumb:EnableMouse(true)
+    do local t = sbThumb:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.22) end
+    sbTrack:Hide()
+
+    local SCROLL_STEP, SMOOTH_SPEED = 60, 12
+    local scrollTarget = 0
+    local function MaxScroll() return max(0, settingsChild:GetHeight() - settingsScroll:GetHeight()) end
+    local function UpdateThumb()
+        local ms = MaxScroll()
+        if ms <= 0 then sbTrack:Hide(); return end
+        sbTrack:Show()
+        local trackH = sbTrack:GetHeight()
+        local visH = settingsScroll:GetHeight()
+        local thumbH = max(30, trackH * (visH / (visH + ms)))
+        sbThumb:SetHeight(thumbH)
+        local ratio = (settingsScroll:GetVerticalScroll() or 0) / ms
+        sbThumb:ClearAllPoints()
+        sbThumb:SetPoint("TOP", sbTrack, "TOP", 0, -(ratio * (trackH - thumbH)))
+    end
+    local smoothFrame = CreateFrame("Frame", nil, root)
+    smoothFrame:Hide()
+    smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+        local cur = settingsScroll:GetVerticalScroll()
+        local ms = MaxScroll()
+        scrollTarget = max(0, min(ms, scrollTarget))
+        local diff = scrollTarget - cur
+        if math.abs(diff) < 0.3 then
+            settingsScroll:SetVerticalScroll(scrollTarget); UpdateThumb(); smoothFrame:Hide(); return
+        end
+        local nv = max(0, min(ms, cur + diff * min(1, SMOOTH_SPEED * elapsed)))
+        settingsScroll:SetVerticalScroll(nv); UpdateThumb()
+    end)
+    local function SmoothTo(t)
+        scrollTarget = max(0, min(MaxScroll(), t))
+        smoothFrame:Show()
+    end
+    settingsScroll:EnableMouseWheel(true)
+    settingsScroll:SetScript("OnMouseWheel", function(_, delta)
+        if MaxScroll() <= 0 then return end
+        local base = smoothFrame:IsShown() and scrollTarget or settingsScroll:GetVerticalScroll()
+        SmoothTo(base - delta * SCROLL_STEP)
+    end)
+    sbThumb:SetScript("OnMouseDown", function()
+        smoothFrame:Hide()
+        local _, cy0 = GetCursorPosition()
+        local startY = cy0 / settingsScroll:GetEffectiveScale()
+        local startScroll = settingsScroll:GetVerticalScroll()
+        sbThumb:SetScript("OnUpdate", function(self)
+            if not IsMouseButtonDown("LeftButton") then self:SetScript("OnUpdate", nil); return end
+            local ms = MaxScroll()
+            local travel = sbTrack:GetHeight() - sbThumb:GetHeight()
+            if travel <= 0 then return end
+            local _, cy = GetCursorPosition(); cy = cy / settingsScroll:GetEffectiveScale()
+            local nv = max(0, min(ms, startScroll + ((startY - cy) / travel) * ms))
+            scrollTarget = nv
+            settingsScroll:SetVerticalScroll(nv); UpdateThumb()
+        end)
+    end)
+
+    -- From here, DualRows build inside the scroll child
+    leftFrame = settingsChild
     leftFrame._showRowDivider = true
     local sy = 0  -- Y within settings scroll child
 
@@ -3981,6 +4317,55 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             if pos == "TOP" then return "DOWN" end
             if pos == "BOTTOM" then return "UP" end
             return "RIGHT"
+        end
+
+        -- THRESHOLD section  rendered after every indicator's DISPLAY section.
+        -- Drives an "expiring soon" recolor (curve route, secret-safe). Default
+        -- OFF so existing indicators are unchanged until enabled.
+        --   Row 1: Enable Threshold (toggle) | Threshold (sec) slider (1-10s).
+        --   Row 2: Color (picker) | Opacity (full slider).
+        -- Frame Alpha (useAlpha) has no colour, so Row 2 is a single Alpha slider.
+        local function BuildThresholdRow(useAlpha)
+            _, h = W:SectionHeader(leftFrame, "THRESHOLD", sy); sy = sy - h
+
+            -- Sub-settings are interactive only while Enable Threshold is on.
+            local thOff = function() return not ind.thresholdEnabled end
+
+            -- Row 1: Enable Threshold | Threshold (sec)
+            SettingsRow(
+                { type="toggle", text="Enable Threshold",
+                  getValue=function() return ind.thresholdEnabled or false end,
+                  setValue=function(v) ind.thresholdEnabled = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Threshold (sec)", min=1, max=10, step=1, trackWidth=120,
+                  disabled=thOff, disabledTooltip="Enable Threshold",
+                  getValue=function() return ind.threshold or 3 end,
+                  setValue=function(v) ind.threshold = v; ReloadAndUpdate() end })
+
+            -- Row 2: Color | Opacity  (Frame Alpha: single full-width Alpha slider)
+            if useAlpha then
+                SettingsRow(
+                    { type="slider", text="Alpha", min=0, max=100, step=1,
+                      disabled=thOff, disabledTooltip="Enable Threshold",
+                      getValue=function() return ind.thresholdAlpha or 100 end,
+                      setValue=function(v) ind.thresholdAlpha = v; ReloadAndUpdate() end },
+                    { type="label", text="" })
+            else
+                SettingsRow(
+                    { type="colorpicker", text="Color", hasAlpha=false,
+                      disabled=thOff, disabledTooltip="Enable Threshold",
+                      getValue=function()
+                          local c = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
+                          return c.r, c.g, c.b
+                      end,
+                      setValue=function(r, g, b)
+                          ind.thresholdColor = { r=r, g=g, b=b }
+                          ReloadAndUpdate()
+                      end },
+                    { type="slider", text="Opacity", min=0, max=100, step=1,
+                      disabled=thOff, disabledTooltip="Enable Threshold",
+                      getValue=function() return ind.thresholdColorOpacity or 100 end,
+                      setValue=function(v) ind.thresholdColorOpacity = v; ReloadAndUpdate() end })
+            end
         end
 
         -- Abilities CB dropdown builder (shared by icon/square, used in row 1)
@@ -4200,6 +4585,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         { type="slider", label="Offset Y", min=-50, max=50, step=1,
                           get=function() return ind.offsetY or 0 end,
                           set=function(v) ind.offsetY = v; ReloadAndUpdate() end },
+                        { type="dropdown", label="Frame Level", values=FRAMELVL_VALUES, order=FRAMELVL_ORDER,
+                          get=function() return ind.frameLevel or "medium" end,
+                          set=function(v) ind.frameLevel = v; ReloadAndUpdate() end },
                     },
                 })
                 local cogBtn = CreateFrame("Button", nil, rgn)
@@ -4232,7 +4620,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             -- Row 2: Opacity | Border (+ inline color swatch)
             local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
             local bdrRow = SettingsRow(
-                { type="slider", text="Opacity", min=0, max=100, step=1, trackWidth=120,
+                { type="slider", text="Opacity", min=0, max=100, step=1,
                   disabled=IconHidden, disabledTooltip="Hide Icons",
                   getValue=function() return ind.iconOpacity or 100 end,
                   setValue=function(v) ind.iconOpacity = v; ReloadAndUpdate() end },
@@ -4411,6 +4799,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 rgn._lastInline = prev
             end
 
+            -- THRESHOLD section (Enable, seconds, color, opacity)
+            BuildThresholdRow(false)
+
         elseif typeInfo and typeInfo.placed then
 
             if indType == "bar" then
@@ -4419,50 +4810,14 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 -----------------------------------------------------------
                 _, h = W:SectionHeader(leftFrame, "CORE", sy); sy = sy - h
 
-                -- Row 1: Position (+ cog) | Orientation
-                local posRow = SettingsRow(
-                    { type="dropdown", text="Position", values=POSITION_VALUES, order=POSITION_ORDER,
-                      getValue=function() return ind.position or "TOPLEFT" end,
-                      setValue=function(v)
-                          ind.position = v
-                          ReloadAndUpdate()
-                          EllesmereUI:RefreshPage()
-                      end },
+                -- Row 1: Orientation | Own Only
+                local oriRow = SettingsRow(
                     { type="dropdown", text="Orientation", values=ORIENT_VALUES, order=ORIENT_ORDER,
                       getValue=function() return ind.orientation or "HORIZONTAL" end,
-                      setValue=function(v) ind.orientation = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end })
-                -- Cog for offset X/Y
-                do
-                    local rgn = posRow._leftRegion
-                    local _, cogShow = EllesmereUI.BuildCogPopup({
-                        title = "Position Offset",
-                        rows = {
-                            { type="slider", label="Offset X", min=-50, max=50, step=1,
-                              get=function() return ind.offsetX or 0 end,
-                              set=function(v) ind.offsetX = v; ReloadAndUpdate() end },
-                            { type="slider", label="Offset Y", min=-50, max=50, step=1,
-                              get=function() return ind.offsetY or 0 end,
-                              set=function(v) ind.offsetY = v; ReloadAndUpdate() end },
-                        },
-                    })
-                    local cogBtn = CreateFrame("Button", nil, rgn)
-                    cogBtn:SetSize(26, 26)
-                    cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                    rgn._lastInline = cogBtn
-                    cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                    cogBtn:SetAlpha(0.4)
-                    local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-                    cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
-                    cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                    cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-                    cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-                end
-
-                -- Row 2: Reverse Fill | Own Only
-                local rfRow = SettingsRow(
-                    { type="toggle", text="Reverse Fill",
-                      getValue=function() return ind.reverseFill or false end,
-                      setValue=function(v) ind.reverseFill = v; ReloadAndUpdate() end },
+                      -- RefreshPage(true) = full rebuild so the Width/Height +
+                      -- Full Width/Height labels re-evaluate isVert and flip live
+                      -- (the fast path only re-reads values, not static labels).
+                      setValue=function(v) ind.orientation = v; ReloadAndUpdate(); EllesmereUI:RefreshPage(true) end },
                     { type="dropdown", text="Own Only",
                       values={ __placeholder = "All" }, order={ "__placeholder" },
                       getValue=function() return "__placeholder" end,
@@ -4491,7 +4846,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         end
                         ownMeasure:Hide()
                         local ownMenuW3 = max(170, ownMaxW3 + 60)
-                        local rgn = rfRow._rightRegion
+                        local rgn = oriRow._rightRegion
                         if rgn._control then rgn._control:Hide() end
                         local cbDD = EllesmereUI.BuildVisOptsCBDropdown(
                             rgn, ownMenuW3, rgn:GetFrameLevel() + 2,
@@ -4515,6 +4870,48 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     end
                 end
 
+                -- Row 2: Position (+ cog) | Reverse Fill
+                local posRow = SettingsRow(
+                    { type="dropdown", text="Position", values=POSITION_VALUES, order=POSITION_ORDER,
+                      getValue=function() return ind.position or "TOPLEFT" end,
+                      setValue=function(v)
+                          ind.position = v
+                          ReloadAndUpdate()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type="toggle", text="Reverse Fill",
+                      getValue=function() return ind.reverseFill or false end,
+                      setValue=function(v) ind.reverseFill = v; ReloadAndUpdate() end })
+                -- Cog for offset X/Y
+                do
+                    local rgn = posRow._leftRegion
+                    local _, cogShow = EllesmereUI.BuildCogPopup({
+                        title = "Position Offset",
+                        rows = {
+                            { type="slider", label="Offset X", min=-50, max=50, step=1,
+                              get=function() return ind.offsetX or 0 end,
+                              set=function(v) ind.offsetX = v; ReloadAndUpdate() end },
+                            { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                              get=function() return ind.offsetY or 0 end,
+                              set=function(v) ind.offsetY = v; ReloadAndUpdate() end },
+                            { type="dropdown", label="Frame Level", values=FRAMELVL_VALUES, order=FRAMELVL_ORDER,
+                              get=function() return ind.frameLevel or "behindBorders" end,
+                              set=function(v) ind.frameLevel = v; ReloadAndUpdate() end },
+                        },
+                    })
+                    local cogBtn = CreateFrame("Button", nil, rgn)
+                    cogBtn:SetSize(26, 26)
+                    cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = cogBtn
+                    cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                    cogBtn:SetAlpha(0.4)
+                    local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                    cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+                    cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                    cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                    cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+                end
+
                 -----------------------------------------------------------
                 --  BAR: DISPLAY
                 -----------------------------------------------------------
@@ -4522,29 +4919,55 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
 
                 local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
 
-                -- Row 1: Width | Height (labels swap when vertical)
+                -- Row 1: Width | Height (labels flip with orientation so each
+                -- slot always names the on-screen axis being edited). Each slider
+                -- is disabled while its matching Full toggle is on.
                 SettingsRow(
-                    { type="slider", text=isVert and "Height" or "Width", min=5, max=80, step=1,
+                    { type="slider", text=isVert and "Height" or "Width", min=5, max=200, step=1,
+                      disabled=function() return ind.barFullWidth end,
+                      disabledTooltip=isVert and "Full Height Bar" or "Full Width Bar", requireState="disabled",
                       getValue=function() return ind.barWidth or 30 end,
                       setValue=function(v) ind.barWidth = v; ReloadAndUpdate() end },
-                    { type="slider", text=isVert and "Width" or "Height", min=1, max=20, step=1,
+                    { type="slider", text=isVert and "Width" or "Height", min=1, max=100, step=1,
+                      disabled=function() return ind.barFullHeight end,
+                      disabledTooltip=isVert and "Full Width Bar" or "Full Height Bar", requireState="disabled",
                       getValue=function() return ind.barHeight or 4 end,
                       setValue=function(v) ind.barHeight = v; ReloadAndUpdate() end })
 
-                -- Row 2: Color | Background (+ inline swatch)
+                -- Row 1b: Full Width | Full Height (labels flip with orientation,
+                -- matching the sliders; the render spans the matching screen axis).
+                -- RefreshPage() so the Width/Height disabled state updates live.
+                SettingsRow(
+                    { type="toggle", text=isVert and "Full Height Bar" or "Full Width Bar",
+                      getValue=function() return ind.barFullWidth or false end,
+                      setValue=function(v) ind.barFullWidth = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
+                    { type="toggle", text=isVert and "Full Width Bar" or "Full Height Bar",
+                      getValue=function() return ind.barFullHeight or false end,
+                      setValue=function(v) ind.barFullHeight = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end })
+
+                -- Row 2: Color | Background (both: opacity slider + inline swatch)
                 local barBgRow = SettingsRow(
-                    { type="colorpicker", text="Color", hasAlpha=false,
-                      getValue=function()
-                          local c = ind.color or { r=0x0C/255, g=0xD2/255, b=0x9D/255 }
-                          return c.r, c.g, c.b
-                      end,
-                      setValue=function(r, g, b)
-                          ind.color = { r=r, g=g, b=b }
-                          ReloadAndUpdate()
-                      end },
+                    { type="slider", text="Color", min=0, max=100, step=1, trackWidth=120,
+                      getValue=function() return ind.barColorOpacity or 100 end,
+                      setValue=function(v) ind.barColorOpacity = v; ReloadAndUpdate() end },
                     { type="slider", text="Background", min=0, max=100, step=1, trackWidth=120,
                       getValue=function() return ind.barBgOpacity or 50 end,
                       setValue=function(v) ind.barBgOpacity = v; ReloadAndUpdate() end })
+                do
+                    local rgn = barBgRow._leftRegion
+                    local colorSwatch = EllesmereUI.BuildColorSwatch(
+                        rgn, barBgRow:GetFrameLevel() + 3,
+                        function()
+                            local c = ind.color or { r=0x0C/255, g=0xD2/255, b=0x9D/255 }
+                            return c.r, c.g, c.b, 1
+                        end,
+                        function(r, g, b)
+                            ind.color = { r=r, g=g, b=b }
+                            ReloadAndUpdate()
+                        end, false, 20)
+                    colorSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = colorSwatch
+                end
                 do
                     local rgn = barBgRow._rightRegion
                     local bgSwatch = EllesmereUI.BuildColorSwatch(
@@ -4560,6 +4983,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                     rgn._lastInline = bgSwatch
                 end
+
+                -- THRESHOLD section (Enable, seconds, color, opacity)
+                BuildThresholdRow(false)
 
             elseif indType == "square" then
                 -- Square uses icon/square path above (handled in the if block)
@@ -4675,21 +5101,33 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 -----------------------------------------------------------
                 _, h = W:SectionHeader(leftFrame, "DISPLAY", sy); sy = sy - h
 
-                -- Row 1: Border Width | Color
+                -- Row 1: Border Width | Color (opacity slider + inline swatch)
                 local ac = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
-                SettingsRow(
+                local bdrColorRow = SettingsRow(
                     { type="slider", text="Border Width", min=1, max=6, step=1, trackWidth=120,
                       getValue=function() return ind.borderWidth or 2 end,
                       setValue=function(v) ind.borderWidth = v; ReloadAndUpdate() end },
-                    { type="colorpicker", text="Color", hasAlpha=false,
-                      getValue=function()
-                          local c = ind.color or { r=ac.r, g=ac.g, b=ac.b }
-                          return c.r, c.g, c.b
-                      end,
-                      setValue=function(r, g, b)
-                          ind.color = { r=r, g=g, b=b }
-                          ReloadAndUpdate()
-                      end })
+                    { type="slider", text="Color", min=0, max=100, step=1, trackWidth=120,
+                      getValue=function() return ind.borderOpacity or 100 end,
+                      setValue=function(v) ind.borderOpacity = v; ReloadAndUpdate() end })
+                do
+                    local rgn = bdrColorRow._rightRegion
+                    local colorSwatch = EllesmereUI.BuildColorSwatch(
+                        rgn, bdrColorRow:GetFrameLevel() + 3,
+                        function()
+                            local c = ind.color or { r=ac.r, g=ac.g, b=ac.b }
+                            return c.r, c.g, c.b, 1
+                        end,
+                        function(r, g, b)
+                            ind.color = { r=r, g=g, b=b }
+                            ReloadAndUpdate()
+                        end, false, 20)
+                    colorSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = colorSwatch
+                end
+
+                -- THRESHOLD section (Enable, seconds, color, opacity)
+                BuildThresholdRow(false)
 
             elseif indType == "healthcolor" then
                 -----------------------------------------------------------
@@ -4774,6 +5212,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                       getValue=function() return ind.opacity or 100 end,
                       setValue=function(v) ind.opacity = v; ReloadAndUpdate() end })
 
+                -- THRESHOLD section (Enable, seconds, color, opacity)
+                BuildThresholdRow(false)
+
             else
                 -- framealpha
                 -----------------------------------------------------------
@@ -4838,12 +5279,19 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     end
                 end
 
-                -- Row 2: Alpha | empty
+                -----------------------------------------------------------
+                --  FRAME ALPHA: DISPLAY
+                -----------------------------------------------------------
+                _, h = W:SectionHeader(leftFrame, "DISPLAY", sy); sy = sy - h
+
+                -- Row 1: Alpha | empty
                 SettingsRow(
                     { type="slider", text="Alpha", min=5, max=100, step=1,
                       getValue=function() return floor((ind.alpha or 0.4) * 100) end,
                       setValue=function(v) ind.alpha = v / 100; ReloadAndUpdate() end },
                     { type="label", text="" })
+                -- Frame Alpha has no Threshold section: its alpha multiplies with
+                -- the range-fade alpha and two secret values can't be combined.
             end
         end
     else
@@ -4855,6 +5303,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         settingsTitle:SetTextColor(0.4, 0.4, 0.4)
         spellsTitle:SetText("")
     end
+
+    -- Size the settings scroll child to its built content + sync the scrollbar.
+    settingsChild:SetHeight(max(viewportH, math.abs(sy) + 12))
+    UpdateThumb()
 
     -- Size the sidebar scroll child to its content (tiles + Add New button)
     local sidebarContentH = max(10, math.abs(tileY))

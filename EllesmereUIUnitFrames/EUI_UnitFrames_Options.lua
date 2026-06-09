@@ -169,21 +169,24 @@ initFrame:SetScript("OnEvent", function(self)
     local healthDisplayOrder = { "both", "curhpshort", "perhp" }
 
     ---------------------------------------------------------------------------
-    --  Health bar texture dropdown values (built from ns tables)
+    --  Health bar texture dropdown  built LIVE each render (mirrors
+    --  GetBorderTextureDropdown) so SharedMedia textures registered by other
+    --  addons after login ALWAYS appear. The shared ns tables are also kept
+    --  current by an LSM registration callback, so late packs are never missed.
     ---------------------------------------------------------------------------
-    -- Append SharedMedia textures so the dropdown includes SM entries
-    if EllesmereUI.AppendSharedMediaTextures then
-        EllesmereUI.AppendSharedMediaTextures(
-            ns.healthBarTextureNames or {},
-            ns.healthBarTextureOrder or {},
-            nil,
-            ns.healthBarTextures
-        )
-    end
+    local function BuildBarTexDropdown()
+        -- Refresh the shared snapshot from LSM (registers this consumer for the
+        -- late-registration callback on first call; idempotent thereafter).
+        if EllesmereUI.AppendSharedMediaTextures then
+            EllesmereUI.AppendSharedMediaTextures(
+                ns.healthBarTextureNames or {},
+                ns.healthBarTextureOrder or {},
+                nil,
+                ns.healthBarTextures
+            )
+        end
 
-    local hbtValues = {}
-    local hbtOrder = {}
-    do
+        local hbtValues, hbtOrder = {}, {}
         local texNames = ns.healthBarTextureNames or {}
         local texOrder2 = ns.healthBarTextureOrder or {}
         for _, key in ipairs(texOrder2) do
@@ -234,6 +237,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end,
         }
+        return hbtValues, hbtOrder
     end
 
     ---------------------------------------------------------------------------
@@ -3414,6 +3418,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- db.profile.healthBarTexture remains as the inherited fallback for any unit
         -- that hasn't set its own, so existing setups are unchanged until overridden.
         local barTexRow
+        local hbtValues, hbtOrder = BuildBarTexDropdown()
         barTexRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
                   getValue=function() return SVal("healthBarTexture", db.profile.healthBarTexture or "none") end,

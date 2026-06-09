@@ -147,15 +147,27 @@ local function RunMigration(spec)
         end
 
     elseif spec.scope == "specProfile" then
+        -- Per-profile spell store: spellAssignments.profiles[name].specProfiles.
+        -- The cdm_per_profile_spell_store_v1 migration (registered first) seeds
+        -- these buckets from the legacy flat store before any specProfile
+        -- migration runs, so iterating the nested structure covers every
+        -- profile's per-spec data in one pass. Flag still lives on each
+        -- specProfData._migrations table (carried forward verbatim by seeding).
         local sa = EllesmereUIDB.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for specKey, specProfData in pairs(sp) do
-                if type(specProfData) == "table" then
-                    RunOne(spec, {
-                        specProfile = specProfData,
-                        specKey     = specKey,
-                    }, specProfData)
+        local profiles = sa and sa.profiles
+        if profiles then
+            for profName, bucket in pairs(profiles) do
+                local sp = type(bucket) == "table" and bucket.specProfiles
+                if type(sp) == "table" then
+                    for specKey, specProfData in pairs(sp) do
+                        if type(specProfData) == "table" then
+                            RunOne(spec, {
+                                specProfile = specProfData,
+                                specKey     = specKey,
+                                profileName = profName,
+                            }, specProfData)
+                        end
+                    end
                 end
             end
         end
@@ -200,15 +212,20 @@ function EllesmereUI.GetMigrationStatus()
                 end
             end
         elseif spec.scope == "specProfile" then
-            local sp = EllesmereUIDB and EllesmereUIDB.spellAssignments and EllesmereUIDB.spellAssignments.specProfiles
-            if sp then
-                for specKey, specProfData in pairs(sp) do
-                    if type(specProfData) == "table" then
-                        local flags = specProfData._migrations
-                        entry.ranScopes[#entry.ranScopes + 1] = {
-                            target = specKey,
-                            ran    = (flags and flags[spec.id]) and true or false,
-                        }
+            local profiles = EllesmereUIDB and EllesmereUIDB.spellAssignments and EllesmereUIDB.spellAssignments.profiles
+            if profiles then
+                for profName, bucket in pairs(profiles) do
+                    local sp = type(bucket) == "table" and bucket.specProfiles
+                    if type(sp) == "table" then
+                        for specKey, specProfData in pairs(sp) do
+                            if type(specProfData) == "table" then
+                                local flags = specProfData._migrations
+                                entry.ranScopes[#entry.ranScopes + 1] = {
+                                    target = profName .. "/" .. specKey,
+                                    ran    = (flags and flags[spec.id]) and true or false,
+                                }
+                            end
+                        end
                     end
                 end
             end
@@ -355,6 +372,31 @@ end
 -- Expose for profile import
 EllesmereUI.SnapProfilePositions = SnapProfilePositions
 
+-- Collect every per-profile spec-profile data table into a flat array. After
+-- the cdm_per_profile_spell_store_v1 seeding migration, CDM spell data lives at
+-- spellAssignments.profiles[name].specProfiles (per profile), not the legacy
+-- flat spellAssignments.specProfiles. Global-scope migration bodies that used to
+-- walk the flat store call this so they transform the LIVE per-profile data.
+-- Seeding is registered first, so the buckets exist by the time any body runs.
+local function CollectSpecProfiles(sa)
+    local out = {}
+    if type(sa) ~= "table" then return out end
+    local profiles = sa.profiles
+    if type(profiles) == "table" then
+        for _, bucket in pairs(profiles) do
+            local sp = type(bucket) == "table" and bucket.specProfiles
+            if type(sp) == "table" then
+                for _, specProfData in pairs(sp) do
+                    if type(specProfData) == "table" then
+                        out[#out + 1] = specProfData
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
 --------------------------------------------------------------------------------
 --  Registered migrations
 --  Each migration below is a one-time data transformation gated by the runner's
@@ -362,6 +404,49 @@ EllesmereUI.SnapProfilePositions = SnapProfilePositions
 --  transition from old inline migrations; they can be removed after a few
 --  release cycles once all existing users have been through the new system.
 --------------------------------------------------------------------------------
+
+-- IMPORTANT: this migration is registered FIRST so it runs before any
+-- specProfile-scoped migration. It converts the legacy account-wide CDM spell
+-- store (spellAssignments.specProfiles, shared by all profiles on a given spec)
+-- into a per-profile store (spellAssignments.profiles[name].specProfiles) by
+-- DeepCopying the legacy data into EVERY existing profile. This is what makes a
+-- profile copy own an independent CDM: before this, deleting a bar in a copied
+-- profile mutated the one shared bucket and wiped the origin. The DeepCopy
+-- carries each spec's _migrations flags forward verbatim, so already-run
+-- specProfile migrations do not re-run against the seeded copies. The legacy
+-- flat table is left in place as a dormant backup for one release; nothing
+-- reads it after seeding. NOTE: this is the spellAssignments.specProfiles store,
+-- NOT the unrelated EllesmereUIDB.specProfiles spec-to-profile auto-switch map.
+EllesmereUI.RegisterMigration({
+    id          = "cdm_per_profile_spell_store_v1",
+    scope       = "global",
+    description = "Fork the shared per-spec CDM spell store into every profile so profile copies own independent CDM data.",
+    body        = function(ctx)
+        local db = ctx.db
+        local sa = db and db.spellAssignments
+        if not sa then return end               -- fresh install: nothing stored yet
+        if sa._perProfileSeeded then return end -- already converted
+        local legacy = sa.specProfiles          -- old account-wide per-spec store
+        if not sa.profiles then sa.profiles = {} end
+        local DeepCopy = EllesmereUI._DeepCopy or (EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy)
+        local function seed(name)
+            if not name then return end
+            if sa.profiles[name] then return end -- idempotent: never clobber an existing bucket
+            local sp = {}
+            if legacy and DeepCopy then sp = DeepCopy(legacy) end
+            sa.profiles[name] = { specProfiles = sp }
+        end
+        if db.profiles then
+            for name, pd in pairs(db.profiles) do
+                if type(pd) == "table" then seed(name) end
+            end
+        end
+        -- Ensure the active/Default profile has a bucket even if it is not yet
+        -- present in db.profiles (very early / minimal-state installs).
+        seed(db.activeProfile or "Default")
+        sa._perProfileSeeded = true
+    end,
+})
 
 EllesmereUI.RegisterMigration({
     id          = "quest_tracker_sec_color_default",
@@ -505,26 +590,20 @@ EllesmereUI.RegisterMigration({
         -- Global: unlock anchors
         snapAnchors(ctx.db.unlockAnchors)
 
-        -- Spec profiles: TBB positions + bar sizes
-        local sa = ctx.db.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for _, specData in pairs(sp) do
-                if type(specData) == "table" then
-                    local tbbPos = specData.tbbPositions
-                    if tbbPos then
-                        for _, pos in pairs(tbbPos) do
-                            if type(pos) == "table" then snapPos(pos) end
-                        end
-                    end
-                    local tbb = specData.trackedBuffBars
-                    local tbbBars = tbb and tbb.bars
-                    if tbbBars then
-                        for _, bar in ipairs(tbbBars) do
-                            if type(bar) == "table" then
-                                roundFields(bar, { "width", "height" })
-                            end
-                        end
+        -- Spec profiles (per-profile store): TBB positions + bar sizes
+        for _, specData in ipairs(CollectSpecProfiles(ctx.db.spellAssignments)) do
+            local tbbPos = specData.tbbPositions
+            if tbbPos then
+                for _, pos in pairs(tbbPos) do
+                    if type(pos) == "table" then snapPos(pos) end
+                end
+            end
+            local tbb = specData.trackedBuffBars
+            local tbbBars = tbb and tbb.bars
+            if tbbBars then
+                for _, bar in ipairs(tbbBars) do
+                    if type(bar) == "table" then
+                        roundFields(bar, { "width", "height" })
                     end
                 end
             end
@@ -1114,20 +1193,17 @@ EllesmereUI.RegisterMigration({
             end
         end
 
-        -- 2. Walk every spec profile, nil stale main-buffs assignedSpells
-        -- and prune orphaned spell data for deleted extra bars.
-        local sa = ctx.db.spellAssignments
-        local specProfiles = sa and sa.specProfiles
-        if type(specProfiles) == "table" then
-            for _, specProf in pairs(specProfiles) do
-                local barSpells = specProf.barSpells
-                if type(barSpells) == "table" then
-                    if barSpells["buffs"] then
-                        barSpells["buffs"].assignedSpells = nil
-                    end
-                    for removedKey in pairs(removedBuffBarKeys) do
-                        barSpells[removedKey] = nil
-                    end
+        -- 2. Walk every spec profile (all profiles' per-spec buckets), nil
+        -- stale main-buffs assignedSpells and prune orphaned spell data for
+        -- deleted extra bars.
+        for _, specProf in ipairs(CollectSpecProfiles(ctx.db.spellAssignments)) do
+            local barSpells = specProf.barSpells
+            if type(barSpells) == "table" then
+                if barSpells["buffs"] then
+                    barSpells["buffs"].assignedSpells = nil
+                end
+                for removedKey in pairs(removedBuffBarKeys) do
+                    barSpells[removedKey] = nil
                 end
             end
         end
@@ -1339,30 +1415,28 @@ EllesmereUI.RegisterMigration({
         local bars = cdmBars and cdmBars.bars
         if type(bars) ~= "table" then return end
 
-        -- The spec profile store is global (not nested in any profile),
-        -- so we read EllesmereUIDB.spellAssignments.specProfiles directly.
-        -- We avoid touching ns.GetSpecProfiles since CDM hasn't initialized
-        -- by the time this runs (early phase, before child OnInitialize).
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local specProfiles = sa and sa.specProfiles
+        -- The spell store is per-profile (spellAssignments.profiles[name].
+        -- specProfiles). We collect every profile's per-spec buckets directly
+        -- (not via ns.GetSpecProfiles) since CDM hasn't initialized by the time
+        -- this runs (early phase, before child OnInitialize). Seeding has
+        -- already run, so the buckets exist.
+        local specProfs = CollectSpecProfiles(EllesmereUIDB and EllesmereUIDB.spellAssignments)
 
         for _, bd in ipairs(bars) do
             if bd.activeStateAnim == "hideActive" and not bd.isGhostBar then
-                if specProfiles then
-                    for _, prof in pairs(specProfiles) do
-                        local barSpells = prof and prof.barSpells
-                        local bs = barSpells and barSpells[bd.key]
-                        if bs and bs.assignedSpells then
-                            if not bs.spellSettings then bs.spellSettings = {} end
-                            for _, sid in ipairs(bs.assignedSpells) do
-                                if sid and sid > 0 then
-                                    if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
-                                    local ss = bs.spellSettings[sid]
-                                    -- Only migrate if the user hasn't already
-                                    -- explicitly set a per-icon active state.
-                                    if not ss.activeSwipeMode and not ss.activeSwipeR then
-                                        ss.activeSwipeMode = "none"
-                                    end
+                for _, prof in ipairs(specProfs) do
+                    local barSpells = prof and prof.barSpells
+                    local bs = barSpells and barSpells[bd.key]
+                    if bs and bs.assignedSpells then
+                        if not bs.spellSettings then bs.spellSettings = {} end
+                        for _, sid in ipairs(bs.assignedSpells) do
+                            if sid and sid > 0 then
+                                if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
+                                local ss = bs.spellSettings[sid]
+                                -- Only migrate if the user hasn't already
+                                -- explicitly set a per-icon active state.
+                                if not ss.activeSwipeMode and not ss.activeSwipeR then
+                                    ss.activeSwipeMode = "none"
                                 end
                             end
                         end
@@ -1736,14 +1810,33 @@ EllesmereUI.RegisterMigration({
     scope       = "global",
     description = "Remove __ghost_buffs spell data from all spec profiles.",
     body = function(ctx)
-        local sa = ctx.db and ctx.db.spellAssignments
-        local sp = sa and sa.specProfiles
-        if not sp then return end
-        for _, specData in pairs(sp) do
+        for _, specData in ipairs(CollectSpecProfiles(ctx.db and ctx.db.spellAssignments)) do
             if specData.barSpells then
                 specData.barSpells["__ghost_buffs"] = nil
             end
         end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "rf_split_absorb_edge_mode_v1",
+    scope       = "profile",
+    description = "Split the shared Raid Frames absorbFromRightEdge toggle into independent absorbEdgeMode / healAbsorbEdgeMode (overlay/right/left) per bar.",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        if type(rf) ~= "table" then return end
+        -- Existing users who had the old single toggle ON get BOTH bars set to
+        -- "right" so their look is unchanged; false/absent -> "overlay" (default).
+        -- Idempotent: only writes the new keys when they are still unset.
+        local function split(oldKey, absKey, healKey)
+            local old = rf[oldKey]
+            if old == nil then return end
+            local mode = (old == true) and "right" or "overlay"
+            if rf[absKey]  == nil then rf[absKey]  = mode end
+            if rf[healKey] == nil then rf[healKey] = mode end
+        end
+        split("absorbFromRightEdge",       "absorbEdgeMode",       "healAbsorbEdgeMode")
+        split("party_absorbFromRightEdge", "party_absorbEdgeMode", "party_healAbsorbEdgeMode")
     end,
 })
 
@@ -2332,13 +2425,9 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
                 end
             end
         end
-        local sa = EllesmereUIDB.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for _, specData in pairs(sp) do
-                if specData.barSpells then
-                    specData.barSpells["__ghost_buffs"] = nil
-                end
+        for _, specData in ipairs(CollectSpecProfiles(EllesmereUIDB.spellAssignments)) do
+            if specData.barSpells then
+                specData.barSpells["__ghost_buffs"] = nil
             end
         end
     end

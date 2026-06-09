@@ -3003,6 +3003,32 @@ do
     local seenGUID = {}
     local guidCount = 0
 
+    local CRACKLING = 203201  -- Crackling Thunder: widens Thunder Clap / Thunder Blast
+
+    -- Improved Whirlwind grants stacks only when the swing connects with an enemy,
+    -- but UNIT_SPELLCAST_SUCCEEDED fires even when it hits nothing (swung at empty
+    -- air, no target, out of combat). Gate the award on an attackable, living enemy
+    -- sitting inside the strike radius. Whirlwind is a ~8 yd self-AoE; the index-2
+    -- distance probe (~11 yd) is slightly generous and also resolves on hostile
+    -- nameplates; Thunder Clap / Thunder Blast reach farther with Crackling Thunder.
+    -- Resolved synchronously at cast time, so a kill that ends combat is still
+    -- counted (the victim is present the instant the cast succeeds).
+    -- NOTE: when no hostile target is set this relies on enemy nameplates showing.
+    local function EnemyInStrikeRange(spellID)
+        local wide = (spellID == 6343 or spellID == 435222) and C_SpellBook.IsSpellKnown(CRACKLING)
+        local function InReach(u)
+            if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
+                return false
+            end
+            return CheckInteractDistance(u, 2) or (wide and CheckInteractDistance(u, 1)) or false
+        end
+        if InReach("target") then return true end
+        for i = 1, 40 do
+            if InReach("nameplate" .. i) then return true end
+        end
+        return false
+    end
+
     function EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
         if event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
             stacks, expiresAt = 0, nil
@@ -3040,6 +3066,8 @@ do
                and not C_SpellBook.IsSpellKnown(CRASHING) then
                 return
             end
+            -- Only award if the swing actually had an enemy to land on.
+            if not EnemyInStrikeRange(spellID) then return end
             stacks = MAX
             expiresAt = GetTime() + DURATION
         elseif SPENDERS[spellID] and stacks > 0 then
@@ -3583,39 +3611,88 @@ end
 --    textures     – key → texture-path table
 --  Safe to call multiple times; duplicate keys are skipped via the textures
 --  table guard.
+--
+--  Registered tables are kept current for the whole session: a single
+--  LibSharedMedia_Registered callback appends any LATE-registered statusbar
+--  texture (other addons register at varying load times, some lazily) into
+--  every consumer's tables, so the dropdowns always list ALL SharedMedia.
 -------------------------------------------------------------------------------
+-- Consumers keyed by their `textures` table identity (dedups repeat calls).
+-- Held on EllesmereUI (not new file-scope locals) to respect this file's
+-- Lua 5.1 local/upvalue cap.
+EllesmereUI._smTexConsumers = EllesmereUI._smTexConsumers or {}
+
 function EllesmereUI.AppendSharedMediaTextures(names, order, castBarNames, textures)
     local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
     if not LSM then return end
-    local smTextures = LSM:HashTable("statusbar")
-    if not smTextures then return end
 
-    -- Collect SM texture names not already present, sort alphabetically
-    local sorted = {}
-    -- Filter out icon textures that some SM packs incorrectly register as statusbar
-    local SM_TEX_BLACKLIST = {
-        play_icon = true, stop_icon = true,
-        user_icon = true, users_icon = true,
-    }
-    for name in pairs(smTextures) do
+    -- Icon textures some SM packs wrongly register as statusbar (cached once).
+    local blacklist = EllesmereUI._smTexBlacklist
+    if not blacklist then
+        blacklist = { play_icon = true, stop_icon = true, user_icon = true, users_icon = true }
+        EllesmereUI._smTexBlacklist = blacklist
+    end
+
+    -- Append one SM texture (by LSM name) into a consumer's tables if absent.
+    -- The "---" separator is added once, lazily, before its first SM key.
+    -- Defined here (not file scope) and captured as an upvalue by the
+    -- registration callback below, which is installed only once.
+    local function AppendOne(c, name, path)
+        if not path then return end
         local key = "sm:" .. name
-        if not textures[key] and not SM_TEX_BLACKLIST[name] then
-            sorted[#sorted + 1] = name
+        if c.textures[key] or blacklist[name] then return end
+        if not c.sepAdded then
+            c.order[#c.order + 1] = "---"
+            c.sepAdded = true
+        end
+        c.textures[key]       = path
+        c.names[key]          = name
+        c.order[#c.order + 1] = key
+        if c.castBarNames then c.castBarNames[key] = name end
+    end
+
+    -- Register this consumer (dedup by the textures table identity). sepAdded
+    -- stays false so the first SM key adds exactly one "---" separator, matching
+    -- the original behavior; the dedup guard prevents a second one on re-calls.
+    local c = EllesmereUI._smTexConsumers[textures]
+    if not c then
+        c = { names = names, order = order, castBarNames = castBarNames, textures = textures }
+        EllesmereUI._smTexConsumers[textures] = c
+    end
+
+    -- Sync all currently-registered SM textures (sorted alphabetically; late
+    -- ones arriving via the callback append after, in registration order).
+    local smTextures = LSM:HashTable("statusbar")
+    if smTextures then
+        local sorted = {}
+        for name in pairs(smTextures) do
+            local key = "sm:" .. name
+            if not textures[key] and not blacklist[name] then
+                sorted[#sorted + 1] = name
+            end
+        end
+        if #sorted > 0 then
+            table.sort(sorted)
+            for _, name in ipairs(sorted) do
+                AppendOne(c, name, smTextures[name])
+            end
         end
     end
-    if #sorted == 0 then return end
-    table.sort(sorted)
 
-    -- Append separator + entries
-    order[#order + 1] = "---"
-    for _, name in ipairs(sorted) do
-        local key = "sm:" .. name
-        textures[key]      = smTextures[name]
-        names[key]         = name
-        order[#order + 1]  = key
-        if castBarNames then
-            castBarNames[key] = name
-        end
+    -- Install the late-registration callback once. Uses a DEDICATED owner so it
+    -- never clobbers the font LibSharedMedia_Registered callback (same owner +
+    -- event would replace it in CallbackHandler).
+    if not EllesmereUI._smTexCallbackInstalled then
+        EllesmereUI._smTexCallbackInstalled = true
+        EllesmereUI._smTexCBOwner = EllesmereUI._smTexCBOwner or {}
+        LSM.RegisterCallback(EllesmereUI._smTexCBOwner, "LibSharedMedia_Registered", function(_, mediatype, key)
+            if mediatype ~= "statusbar" then return end
+            local path = LSM:Fetch("statusbar", key)
+            if not path then return end
+            for _, cc in pairs(EllesmereUI._smTexConsumers) do
+                AppendOne(cc, key, path)
+            end
+        end)
     end
 end
 
@@ -8201,7 +8278,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.0.8"
+EllesmereUI.VERSION = "8.0.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

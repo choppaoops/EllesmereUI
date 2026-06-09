@@ -349,7 +349,40 @@ local function ResolveCastSpellName(binding)
     return binding.spell
 end
 
-local function BuildMacroText(binding)
+-- Build the dynamic-rez /cast lines for a binding. Used by the dynamicrez
+-- binding type and by Smart Rez on any castable binding. Returns a list of
+-- macro lines (possibly empty) or nil when the player's class has no rez kit.
+-- Never includes /stopmacro -- the caller adds that for oocOnly.
+local function BuildRezLines(binding, guard)
+    local _, pClass = UnitClass("player")
+    local kit = REZ_BY_CLASS[pClass]
+    if not kit then return nil end
+    local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    local function Known(sid)
+        if not sid then return nil end
+        if C_SpellBook.IsSpellInSpellBook and bank then
+            if not C_SpellBook.IsSpellInSpellBook(sid, bank, true) then return nil end
+        end
+        return C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+    end
+    local battleName = Known(kit.battle)
+    local groupName  = Known(kit.group)
+    local singleName = Known(kit.single)
+    local lines = {}
+    if battleName and not binding.oocOnly then
+        lines[#lines + 1] = "/cast [@mouseover,help,dead,combat" .. guard .. "] " .. battleName
+    end
+    if groupName then
+        lines[#lines + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. groupName
+    elseif singleName then
+        lines[#lines + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. singleName
+    end
+    return lines
+end
+
+-- Build the base macrotext for a binding (without Smart Rez). Returns nil when
+-- the binding needs no macro wrapping (it is applied as a direct spell instead).
+local function BuildBaseMacroText(binding)
     local isHC = binding.hovercast
     local guard = isHC and MOUNT_GUARD or ""
 
@@ -405,35 +438,12 @@ local function BuildMacroText(binding)
         end
         return cmd
     elseif binding.type == "dynamicrez" then
-        local _, pClass = UnitClass("player")
-        local kit = REZ_BY_CLASS[pClass]
-        if not kit then return nil end
-        local parts = {}
+        local lines = BuildRezLines(binding, guard)
+        if not lines or #lines == 0 then return nil end
         if binding.oocOnly then
-            parts[#parts + 1] = "/stopmacro [combat]"
+            table.insert(lines, 1, "/stopmacro [combat]")
         end
-        local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
-        local function Known(sid)
-            if not sid then return nil end
-            if C_SpellBook.IsSpellInSpellBook and bank then
-                if not C_SpellBook.IsSpellInSpellBook(sid, bank, true) then return nil end
-            end
-            local n = C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
-            return n
-        end
-        local battleName = Known(kit.battle)
-        local groupName  = Known(kit.group)
-        local singleName = Known(kit.single)
-        if battleName and not binding.oocOnly then
-            parts[#parts + 1] = "/cast [@mouseover,help,dead,combat" .. guard .. "] " .. battleName
-        end
-        if groupName then
-            parts[#parts + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. groupName
-        elseif singleName then
-            parts[#parts + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. singleName
-        end
-        if #parts == 0 then return nil end
-        return table.concat(parts, "\n")
+        return table.concat(lines, "\n")
     elseif binding.type == "dispel" or binding.type == "external" then
         local spellList = binding.type == "dispel" and DISPEL_SPELLS or EXTERNAL_SPELLS
         local _, pClass = UnitClass("player")
@@ -455,6 +465,36 @@ local function BuildMacroText(binding)
         return table.concat(lines, "\n")
     end
     return nil
+end
+
+-- Wrap a binding's base macrotext with Smart Rez. When binding.smartRez is set,
+-- the dynamic-rez /cast lines are prepended so pressing the binding on a dead
+-- unit resurrects it; on a living unit the rez lines fail their [dead] condition
+-- and the macro falls through to the binding's normal action.
+local function BuildMacroText(binding)
+    local base = BuildBaseMacroText(binding)
+    if not binding.smartRez then return base end
+    -- Smart Rez never applies to non-cast bindings or the rez binding itself.
+    if binding.type == "target" or binding.type == "menu" or binding.type == "dynamicrez" then
+        return base
+    end
+    local guard = binding.hovercast and MOUNT_GUARD or ""
+    local rez = BuildRezLines(binding, guard)
+    if not rez or #rez == 0 then return base end
+    local rezText = table.concat(rez, "\n")
+
+    if base then
+        return rezText .. "\n" .. base
+    end
+    -- A plain spell binding produces no base macro (it is applied as a direct
+    -- spell). Convert it to a macro so the rez lines can lead, then cast the
+    -- spell on the same unit the rez check used.
+    if binding.type == "spell" then
+        local name = ResolveCastSpellName(binding)
+        if not name then return rezText end
+        return rezText .. "\n/cast [@mouseover" .. guard .. "] " .. name
+    end
+    return rezText
 end
 
 -- Get the icon for a binding
@@ -3122,6 +3162,27 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                 end)
             PP.Point(kbBtn, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
             centerY = centerY - ROW_H
+        end
+
+        -- Smart Rez row: when on, pressing this binding on a dead unit runs the
+        -- dynamic rez logic; on a living unit the binding's normal action fires.
+        do
+            -- Smart Rez applies to any binding whose action is macro-expressible
+            -- (so a [dead] /cast can lead and fall through to the normal action).
+            -- target/menu are excluded: their native secure actions have no macro
+            -- fallback (see note in BuildMacroText).
+            local t = selectedBinding.type
+            local canSmartRez = t == "spell" or t == "macro" or t == "item"
+                or t == "dispel" or t == "external"
+                or t == "trinket1" or t == "trinket2"
+            if canSmartRez then
+                local row = MakeRow(centerY)
+                RowLabel(row, "Enable Dynamic Rez")
+                RowToggle(row,
+                    function() return selectedBinding.smartRez end,
+                    function(v) selectedBinding.smartRez = v; ns.CC_ApplyBindings() end)
+                centerY = centerY - ROW_H
+            end
         end
 
         -- Spell/macro-specific options (not for target/menu)

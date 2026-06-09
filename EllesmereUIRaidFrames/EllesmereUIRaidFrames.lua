@@ -208,14 +208,16 @@ local PA_STRATA_FIX = {
 
 -- Absorb shield textures (must match UnitFrames exactly)
 local ABSORB_STYLE_TEX = {
-    striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5.png",
-    clean    = "Interface\\Buttons\\WHITE8X8",
-    blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+    striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5.png",
+    stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+    clean           = "Interface\\Buttons\\WHITE8X8",
+    blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
 }
 local ABSORB_STYLE_ALPHA = {
-    striped  = 0.8,
-    clean    = 0.3,
-    blizzard = 0.8,
+    striped         = 0.8,
+    stripedReversed = 0.8,
+    clean           = 0.3,
+    blizzard        = 0.8,
 }
 
 -- Role icon definitions per style
@@ -430,7 +432,12 @@ local defaults = {
         healPrediction   = false,
         healPredOpacity  = 75,
         healPredColor    = { r = 102/255, g = 243/255, b = 102/255 },
-        absorbFromRightEdge = false,
+        -- Absorb / heal absorb placement, independent per bar.
+        -- "overlay" = over the health fill (default), "right" = from the frame's
+        -- right edge, "left" = from the frame's left edge. (Migrated from the old
+        -- shared absorbFromRightEdge boolean.)
+        absorbEdgeMode     = "overlay",
+        healAbsorbEdgeMode = "overlay",
 
         -- Indicators
         roleIconStyle    = "modern",  -- "none", "modern", "modernCircle", "styled", "classicCircle", "classic"
@@ -593,6 +600,8 @@ local defaults = {
         partyCenterWhenSolo = false,  -- center the lone player frame in the container when solo
         partySyncSections = nil,  -- nil = all synced; { healthBar=false } = healthBar custom
         partySortMode     = "ROLE",
+        partyPrioritizeClass = false, -- sort by class within the main sort (party only)
+        partyClassOrder    = nil,  -- nil = all 13 classes alphabetical by name
         partyShowSelfFirst = true,
         partySelfLast      = false,
         partyHorizontal   = false,
@@ -1092,21 +1101,40 @@ local function GetHealthColor(unit, s)
     end
 end
 
--- Resolve the display name for a unit. When Northern Sky Raid Tools (NSAPI) is
--- present, returns the NSRT nickname; otherwise the short character name. We pass
--- our addon key "EUI" (NSRT added a dedicated per-addon setting + EUI_NICKNAME_TOGGLE
--- callback for us): NSAPI:GetName self-gates on NSRT's Global Nicknames AND its EUI
--- checkbox, so the user controls nicknames entirely through NSRT (no EUI-side toggle).
--- GetName returns the short name when no nickname is set and guards secret values
--- itself, so the plain UnitName path (with Ambiguate) only runs as a fallback. pcall
--- keeps a misbehaving external API from ever breaking name rendering.
+-- Resolve the display name for a unit. Nickname sources are consulted in order:
+-- Northern Sky Raid Tools (NSAPI) first, then Timeline Reminders (TimelineReminders),
+-- falling back to the short character name. For NSRT we pass our addon key "EUI"
+-- (NSRT added a dedicated per-addon setting + EUI_NICKNAME_TOGGLE callback for us):
+-- NSAPI:GetName self-gates on NSRT's Global Nicknames AND its EUI checkbox, so the
+-- user controls nicknames entirely through NSRT (no EUI-side toggle). GetName returns
+-- the short name when no nickname is set, which falls through to the next source.
+-- pcall keeps a misbehaving external API from ever breaking name rendering.
 local function ResolveDisplayName(unit)
     local name = UnitName(unit) or ""
     if NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
         if ok and type(dn) == "string"
-           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
             return dn
+        end
+    end
+    -- Timeline Reminders nicknames (secondary source, consulted when NSRT did not
+    -- produce a nickname). Gated by TR's own EllesmereUI checkbox, so the user
+    -- controls these entirely through TR (no EUI-side toggle). GetNickname falls
+    -- back to the plain unit name when no nickname is set, so HasNickname is
+    -- checked first to keep the normal Ambiguate path for un-nicknamed units.
+    local TR = TimelineReminders
+    if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
+        local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, "EllesmereUI")
+        if okGate and enabled then
+            local okHas, has = pcall(TR.HasNickname, TR, unit)
+            if okHas and has then
+                local ok, dn = pcall(TR.GetNickname, TR, unit)
+                if ok and type(dn) == "string"
+                   and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                    return dn
+                end
+            end
         end
     end
     if Ambiguate then name = Ambiguate(name, "short") end
@@ -1287,7 +1315,7 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
     local mask = absorbBar._absorbMask
     absorbBar:SetStatusBarTexture(tex)
     absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
-    local tiled = (style == "striped")
+    local tiled = (style == "striped" or style == "stripedReversed")
     local fill = absorbBar:GetStatusBarTexture()
     if fill then
         fill:SetDrawLayer("ARTWORK", 1)
@@ -1317,7 +1345,7 @@ ns.ApplyHealAbsorbStyle = function(haBar, style, settings)
     local mask = haBar._absorbMask
     haBar:SetStatusBarTexture(tex)
     haBar:SetStatusBarColor(hc.r, hc.g, hc.b, alpha)
-    local tiled = (style == "striped")
+    local tiled = (style == "striped" or style == "stripedReversed")
     local fill = haBar:GetStatusBarTexture()
     if fill then
         fill:SetDrawLayer("ARTWORK", 2)
@@ -1404,19 +1432,50 @@ local function CreateAbsorbBar(button, healthBar)
             healPredBar:SetPoint("TOPLEFT", fill, "TOPRIGHT", 0, 0)
             healPredBar:SetPoint("BOTTOMLEFT", fill, "BOTTOMRIGHT", 0, 0)
         end
-        -- Right-edge mode: absorbs render from frame right edge filling left
-        if db.profile.absorbFromRightEdge then
+        -- Shield absorb placement (independent of heal absorb).
+        --   overlay = backfill into the filled health from the HP edge (default)
+        --   right   = full bar, fill from the frame's right edge
+        --   left    = full bar, fill from the frame's left edge
+        local absorbMode = db.profile.absorbEdgeMode or "overlay"
+        if absorbMode == "right" or absorbMode == "left" then
             curClip:ClearAllPoints()
             curClip:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
             curClip:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
-            if healAbsorbBar then
-                healAbsorbBar:ClearAllPoints()
-                healAbsorbBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
-                healAbsorbBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+            backfillBar:ClearAllPoints()
+            if absorbMode == "left" then
+                backfillBar:SetReverseFill(false)
+                backfillBar:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                backfillBar:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+            else
+                backfillBar:SetReverseFill(true)
+                backfillBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+                backfillBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
             end
         else
-            if healAbsorbBar then
-                healAbsorbBar:ClearAllPoints()
+            -- Overlay: curClip already clipped to the fill above. Restore the
+            -- backfill's default right-anchored reverse fill (reset if the mode
+            -- was previously left).
+            backfillBar:SetReverseFill(true)
+            backfillBar:ClearAllPoints()
+            backfillBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+            backfillBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+        end
+
+        -- Heal absorb placement (independent of shield absorb).
+        if healAbsorbBar then
+            local healMode = db.profile.healAbsorbEdgeMode or "overlay"
+            healAbsorbBar:ClearAllPoints()
+            if healMode == "right" then
+                healAbsorbBar:SetReverseFill(true)
+                healAbsorbBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+                healAbsorbBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+            elseif healMode == "left" then
+                healAbsorbBar:SetReverseFill(false)
+                healAbsorbBar:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                healAbsorbBar:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+            else
+                -- Overlay (default): eat into the filled health from the HP edge.
+                healAbsorbBar:SetReverseFill(true)
                 healAbsorbBar:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
                 healAbsorbBar:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
             end
@@ -1554,8 +1613,9 @@ local function UpdateAbsorb(button, unit)
         fw:SetValue(absorbAmt)
         fw:Show()
     end
-    -- Right-edge mode: forward bar not needed, all absorb shown via backfill
-    if s.absorbFromRightEdge and fw then fw:Hide() end
+    -- Edge modes (right/left): the full-bar backfill shows the whole absorb, so
+    -- the forward bar (overlay-only) is not needed.
+    if (s.absorbEdgeMode or "overlay") ~= "overlay" and fw then fw:Hide() end
 
     -- Heal absorb: feed directly without Lua comparison
     if ha then
@@ -4176,6 +4236,73 @@ function ns._BuildSelfFirstNameList(playerGroup, sortByRole, roleOrder, selfLast
     return table.concat(names, ",")
 end
 
+-- Default class sort order: the real player classes only, alphabetical by
+-- localized name. Enumerated via GetNumClasses + C_CreatureInfo.GetClassInfo so
+-- non-class entries (e.g. Adventurer/Traveler in LOCALIZED_CLASS_NAMES_MALE) are
+-- excluded. Also populates ns._classNameByToken (token -> localized name) for the
+-- options list. Cached on the namespace (NOT a file-scope local -- this chunk is
+-- at the Lua 5.1 200-local cap).
+function ns._GetDefaultClassOrder()
+    if ns._defaultClassOrderCache then return ns._defaultClassOrderCache end
+    local list, names = {}, {}
+    local n = (GetNumClasses and GetNumClasses()) or 0
+    for i = 1, n do
+        local info = C_CreatureInfo and C_CreatureInfo.GetClassInfo and C_CreatureInfo.GetClassInfo(i)
+        if info and info.classFile then
+            list[#list + 1] = info.classFile
+            names[info.classFile] = info.className or info.classFile
+        end
+    end
+    table.sort(list, function(a, b) return (names[a] or a) < (names[b] or b) end)
+    ns._classNameByToken = names
+    if #list > 0 then ns._defaultClassOrderCache = list end
+    return list
+end
+
+-- Build a class-priority nameList for the party header. Lists the party members
+-- the header shows (player only when includePlayer), ordered by role (optional
+-- primary) -> class -> name. Names use the same UnitName + "-realm" format
+-- Blizzard's GetGroupRosterInfo produces for party units, so the secure header
+-- matches them. nameList is only honored when groupFilter is cleared.
+function ns._BuildPartyClassNameList(includePlayer, sortByRole, roleOrder, classOrder)
+    if not IsInGroup() then return nil end
+    classOrder = classOrder or ns._GetDefaultClassOrder()
+    local classPri = {}
+    for i, c in ipairs(classOrder) do classPri[c] = i end
+    local rolePri
+    if sortByRole then
+        rolePri = {}
+        for i, r in ipairs(roleOrder) do rolePri[r] = i end
+    end
+    local members = {}
+    local units = {}
+    if includePlayer then units[#units + 1] = "player" end
+    for i = 1, 4 do units[#units + 1] = "party" .. i end
+    for _, unit in ipairs(units) do
+        if UnitExists(unit) then
+            local name, server = UnitName(unit)
+            if name then
+                if server and server ~= "" then name = name .. "-" .. server end
+                local _, classToken = UnitClass(unit)
+                members[#members + 1] = {
+                    name = name,
+                    rolePri = (rolePri and rolePri[UnitGroupRolesAssigned(unit)]) or 99,
+                    classPri = classPri[classToken] or 99,
+                }
+            end
+        end
+    end
+    if #members == 0 then return nil end
+    table.sort(members, function(a, b)
+        if sortByRole and a.rolePri ~= b.rolePri then return a.rolePri < b.rolePri end
+        if a.classPri ~= b.classPri then return a.classPri < b.classPri end
+        return a.name < b.name
+    end)
+    local names = {}
+    for _, m in ipairs(members) do names[#names + 1] = m.name end
+    return table.concat(names, ",")
+end
+
 -------------------------------------------------------------------------------
 --  Apply sort attributes to all headers. Show Self First (raid) uses a per-group
 --  nameList on the player's own subgroup so the secure header itself puts the
@@ -5391,6 +5518,12 @@ local function OnEvent(self, event, arg1, ...)
         if not inCombat and framesVisible and ns._ApplySortToHeaders then
             ns._ApplySortToHeaders()
         end
+        -- Party Prioritize Class orders via a role-aware nameList, so a role
+        -- change must rebuild it (native role sort updates itself; this does not).
+        if not inCombat and ns._partyFramesVisible and db.profile.partyPrioritizeClass
+            and ns._LayoutPartyFrames then
+            ns._LayoutPartyFrames()
+        end
     elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_LEADER_CHANGED" then
         if inCombat then
             ns._rosterDirtyInCombat = true
@@ -5773,8 +5906,8 @@ do
         healthBar = {
             "healthBarTexture", "healthBarOpacity", "healthColorMode",
             "customFillColor", "customBgColor", "bgDarkness", "smoothBars",
-            "absorbStyle", "absorbOpacity", "absorbColor", "absorbFromRightEdge",
-            "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor",
+            "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
+            "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
             "healPrediction", "healPredOpacity", "healPredColor",
         },
         powerBar = {
@@ -6134,34 +6267,52 @@ ns._LayoutPartyFrames = function()
     if not InCombatLockdown() then
         local pSortMode = s.partySortMode or s.sortMode
         local sortByRole = pSortMode == "ROLE"
-        local wantGroupBy = sortByRole and "ASSIGNEDROLE" or nil
-        local wantSortMethod = sortByRole and "NAME" or "INDEX"
-        local wantGroupingOrder = ""
-        if sortByRole then
-            local ro = s.partyRoleOrder or s.roleOrder or { "TANK", "HEALER", "DAMAGER" }
-            wantGroupingOrder = table.concat(ro, ",") .. ",NONE"
-        end
+        local roleOrder = s.partyRoleOrder or s.roleOrder or { "TANK", "HEALER", "DAMAGER" }
         -- showPlayer is false when the self button owns the player (useSelf) or
         -- when hiding self; true only for a normal in-header player frame.
         local wantShowPlayer = not hideSelf and not useSelf
+
+        -- Prioritize Class drives the header with an explicit nameList ordered by
+        -- role (optional primary) -> class -> name. nameList is honored only when
+        -- groupFilter is cleared, so we clear it and let showParty/showPlayer pick
+        -- members. When off, fall back to the native groupBy/sortMethod path.
+        local wantGroupBy, wantSortMethod, wantGroupingOrder, wantNameList, wantGroupFilter
+        if s.partyPrioritizeClass then
+            wantNameList = ns._BuildPartyClassNameList(wantShowPlayer, sortByRole, roleOrder, s.partyClassOrder)
+        end
+        if wantNameList then
+            wantGroupBy = nil
+            wantSortMethod = "NAMELIST"
+            wantGroupingOrder = ""
+            wantGroupFilter = nil
+        else
+            wantNameList = nil
+            wantGroupBy = sortByRole and "ASSIGNEDROLE" or nil
+            wantSortMethod = sortByRole and "NAME" or "INDEX"
+            wantGroupingOrder = sortByRole and (table.concat(roleOrder, ",") .. ",NONE") or ""
+            wantGroupFilter = "1,2,3,4,5,6,7,8"
+        end
+
+        local function ApplyAttrs()
+            ns._partyHeader:SetAttribute("groupFilter", wantGroupFilter)
+            ns._partyHeader:SetAttribute("nameList", wantNameList)
+            ns._partyHeader:SetAttribute("groupingOrder", wantGroupingOrder)
+            ns._partyHeader:SetAttribute("groupBy", wantGroupBy)
+            ns._partyHeader:SetAttribute("sortMethod", wantSortMethod)
+            ns._partyHeader:SetAttribute("showPlayer", wantShowPlayer)
+        end
         local needsHideShow = (ns._partyHeader:GetAttribute("groupBy") ~= wantGroupBy)
             or (ns._partyHeader:GetAttribute("sortMethod") ~= wantSortMethod)
             or (ns._partyHeader:GetAttribute("groupingOrder") ~= wantGroupingOrder)
             or (ns._partyHeader:GetAttribute("showPlayer") ~= wantShowPlayer)
+            or (ns._partyHeader:GetAttribute("nameList") ~= wantNameList)
+            or (ns._partyHeader:GetAttribute("groupFilter") ~= wantGroupFilter)
         if needsHideShow and ns._partyHeader:IsShown() then
             ns._partyHeader:Hide()
-            ns._partyHeader:SetAttribute("nameList", nil)
-            ns._partyHeader:SetAttribute("groupingOrder", wantGroupingOrder)
-            ns._partyHeader:SetAttribute("groupBy", wantGroupBy)
-            ns._partyHeader:SetAttribute("sortMethod", wantSortMethod)
-            ns._partyHeader:SetAttribute("showPlayer", wantShowPlayer)
+            ApplyAttrs()
             ns._partyHeader:Show()
         elseif needsHideShow then
-            ns._partyHeader:SetAttribute("nameList", nil)
-            ns._partyHeader:SetAttribute("groupingOrder", wantGroupingOrder)
-            ns._partyHeader:SetAttribute("groupBy", wantGroupBy)
-            ns._partyHeader:SetAttribute("sortMethod", wantSortMethod)
-            ns._partyHeader:SetAttribute("showPlayer", wantShowPlayer)
+            ApplyAttrs()
         end
     end
 
@@ -8184,7 +8335,7 @@ local function ApplyPreviewData(f, index)
         if absStyle ~= "none" and absorbAmt > 0 then
             local tex = ABSORB_STYLE_TEX[absStyle] or "Interface\\Buttons\\WHITE8X8"
             local alpha = (s.absorbOpacity or 90) / 100
-            local tiled = (absStyle == "striped")
+            local tiled = (absStyle == "striped" or absStyle == "stripedReversed")
             local hpW = w
             local hpH = healthH
             local mask = f._absorbBar._mask
@@ -8231,14 +8382,26 @@ local function ApplyPreviewData(f, index)
             f._absorbBar:Hide()
             if fw then fw:Hide() end
         end
-        -- Position clip frames based on absorb rendering mode
+        -- Position clip frames + backfill based on shield absorb placement
+        -- (mirrors the live ReanchorAbsorbToFill).
         local cc = f._absorbBar._curClip
         local mc = f._absorbBar._missClip
         if cc and mc and f._health then
-            if s.absorbFromRightEdge then
+            local absorbMode = s.absorbEdgeMode or "overlay"
+            if absorbMode == "right" or absorbMode == "left" then
                 cc:ClearAllPoints()
                 cc:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
                 cc:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                f._absorbBar:ClearAllPoints()
+                if absorbMode == "left" then
+                    f._absorbBar:SetReverseFill(false)
+                    f._absorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                    f._absorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                else
+                    f._absorbBar:SetReverseFill(true)
+                    f._absorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                    f._absorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                end
                 if fw then fw:Hide() end
             else
                 local fill = f._health:GetStatusBarTexture()
@@ -8248,6 +8411,11 @@ local function ApplyPreviewData(f, index)
                 mc:ClearAllPoints()
                 mc:SetPoint("TOPLEFT", fill, "TOPRIGHT", -1, 0)
                 mc:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                -- Restore overlay backfill (right-anchored reverse fill).
+                f._absorbBar:SetReverseFill(true)
+                f._absorbBar:ClearAllPoints()
+                f._absorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                f._absorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
             end
         end
     end
@@ -8265,7 +8433,7 @@ local function ApplyPreviewData(f, index)
             local haTex = ABSORB_STYLE_TEX[haStyle] or "Interface\\Buttons\\WHITE8X8"
             local haAlpha = (s.healAbsorbOpacity or 75) / 100
             local hc = s.healAbsorbColor or { r = 0.8, g = 0.15, b = 0.15 }
-            local tiled = (haStyle == "striped")
+            local tiled = (haStyle == "striped" or haStyle == "stripedReversed")
             local hpW = w
             local hpH = healthH
             local mask = f._healAbsorbBar._mask
@@ -8286,15 +8454,21 @@ local function ApplyPreviewData(f, index)
         else
             f._healAbsorbBar:Hide()
         end
-        -- Right-edge mode: anchor heal absorb to health bar right edge
+        -- Heal absorb placement (independent of shield absorb; mirrors live).
         if f._health then
-            if s.absorbFromRightEdge then
-                f._healAbsorbBar:ClearAllPoints()
+            local healMode = s.healAbsorbEdgeMode or "overlay"
+            f._healAbsorbBar:ClearAllPoints()
+            if healMode == "right" then
+                f._healAbsorbBar:SetReverseFill(true)
                 f._healAbsorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
                 f._healAbsorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+            elseif healMode == "left" then
+                f._healAbsorbBar:SetReverseFill(false)
+                f._healAbsorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                f._healAbsorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
             else
                 local fill = f._health:GetStatusBarTexture()
-                f._healAbsorbBar:ClearAllPoints()
+                f._healAbsorbBar:SetReverseFill(true)
                 f._healAbsorbBar:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
                 f._healAbsorbBar:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
             end
@@ -9934,29 +10108,42 @@ local function BuildPartyPreviewRoles()
     local selfLast = db.profile.partySelfLast
     if selfLast == nil then selfLast = db.profile.showSelfLast end
     if selfLast then showSelfFirst = true end  -- self ordering active either way
-    if sortMode == "ROLE" or showSelfFirst then
+    local prioritizeClass = db.profile.partyPrioritizeClass
+    if sortMode == "ROLE" or showSelfFirst or prioritizeClass then
         local group = {}
         for u = 1, 5 do
             group[u] = {
                 role = ns._partyPvRoles[u],
                 classToken = ns._partyPvCT[u],
                 isPlayer = (u == 1),
+                idx = u,
             }
         end
-        if sortMode == "ROLE" then
+        if sortMode == "ROLE" or prioritizeClass then
+            -- Mirror the live header order: role (optional primary) -> class (when
+            -- Prioritize Class is on) -> original slot. Comparator matches
+            -- _BuildPartyClassNameList so the preview replicates the real frames.
+            local sortByRole = (sortMode == "ROLE")
             local roleOrder = db.profile.partyRoleOrder or db.profile.roleOrder or { "TANK", "HEALER", "DAMAGER" }
-            local tmpGroup = {}
-            for _, role in ipairs(roleOrder) do
-                for _, entry in ipairs(group) do
-                    if entry.role == role then tmpGroup[#tmpGroup + 1] = entry end
+            local rolePri = {}
+            for i, r in ipairs(roleOrder) do rolePri[r] = i end
+            local classPri
+            if prioritizeClass then
+                classPri = {}
+                local co = db.profile.partyClassOrder or ns._GetDefaultClassOrder()
+                for i, c in ipairs(co) do classPri[c] = i end
+            end
+            table.sort(group, function(a, b)
+                if sortByRole then
+                    local ra, rb = rolePri[a.role] or 99, rolePri[b.role] or 99
+                    if ra ~= rb then return ra < rb end
                 end
-            end
-            for _, entry in ipairs(group) do
-                local found = false
-                for _, t in ipairs(tmpGroup) do if t == entry then found = true; break end end
-                if not found then tmpGroup[#tmpGroup + 1] = entry end
-            end
-            group = tmpGroup
+                if classPri then
+                    local ca, cb = classPri[a.classToken] or 99, classPri[b.classToken] or 99
+                    if ca ~= cb then return ca < cb end
+                end
+                return a.idx < b.idx
+            end)
         end
         if showSelfFirst then
             local playerPos
@@ -10657,29 +10844,54 @@ function ERF:OnEnable()
         end
     end)
 
-    -- Northern Sky Raid Tools (NSRT) nickname integration. When NSAPI is present
-    -- the raid + party names use NSRT nicknames (see ResolveDisplayName). Two
-    -- callbacks refresh names instantly without a /reload: NSRT_NICKNAME_UPDATED
-    -- fires when a nickname is added/removed, and EUI_NICKNAME_TOGGLE fires when the
-    -- user flips NSRT's dedicated EllesmereUI nicknames checkbox. NSRT may load after
-    -- us, so registration retries on PLAYER_LOGIN / PLAYER_ENTERING_WORLD until it sticks.
+    -- Nickname integrations. When Northern Sky Raid Tools (NSAPI) or Timeline
+    -- Reminders (TimelineReminders) is present, raid + party names use their
+    -- nicknames (see ResolveDisplayName). Callbacks refresh names instantly
+    -- without a /reload when nickname data changes or the user flips the addon's
+    -- dedicated EllesmereUI nicknames checkbox. Both addons may load after us, so
+    -- registration retries on PLAYER_LOGIN / PLAYER_ENTERING_WORLD until it sticks.
+    -- All registrations are dot calls, NOT colon: the first argument is the unique
+    -- registrant key (CallbackHandler keys registrations by it). A colon call would
+    -- pass the API table itself as the key and collide with other addons doing the same.
     local function RegisterNSRTNicknames()
         if ns._nsrtNickHooked then return true end
         if NSAPI and NSAPI.RegisterCallback then
             local function onChange() if ns.RefreshAllNames then ns.RefreshAllNames() end end
-            NSAPI:RegisterCallback("NSRT_NICKNAME_UPDATED", onChange, "EllesmereUI")
-            NSAPI:RegisterCallback("EUI_NICKNAME_TOGGLE", onChange, "EllesmereUI")
+            NSAPI.RegisterCallback("EllesmereUI", "NSRT_NICKNAME_UPDATED", onChange)
+            NSAPI.RegisterCallback("EllesmereUI", "EUI_NICKNAME_TOGGLE", onChange)
             ns._nsrtNickHooked = true
             return true
         end
         return false
     end
-    if not RegisterNSRTNicknames() then
-        local nsrtFrame = CreateFrame("Frame")
-        nsrtFrame:RegisterEvent("PLAYER_LOGIN")
-        nsrtFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        nsrtFrame:SetScript("OnEvent", function(self)
-            if RegisterNSRTNicknames() then self:UnregisterAllEvents() end
+    local function RegisterTRNicknames()
+        if ns._trNickHooked then return true end
+        local TR = TimelineReminders
+        if TR and TR.RegisterCallback then
+            -- CallbackHandler passes the event name as the first callback argument.
+            -- Toggle fires for every addon checkbox in TR, so filter on ours.
+            TR.RegisterCallback("EllesmereUI", "TimelineReminders_NicknameToggle", function(_, _, addOnName)
+                if addOnName == "EllesmereUI" and ns.RefreshAllNames then ns.RefreshAllNames() end
+            end)
+            TR.RegisterCallback("EllesmereUI", "TimelineReminders_NicknameUpdate", function()
+                if ns.RefreshAllNames then ns.RefreshAllNames() end
+            end)
+            ns._trNickHooked = true
+            return true
+        end
+        return false
+    end
+    local nsrtHooked = RegisterNSRTNicknames()
+    local trHooked = RegisterTRNicknames()
+    if not (nsrtHooked and trHooked) then
+        local nickFrame = CreateFrame("Frame")
+        nickFrame:RegisterEvent("PLAYER_LOGIN")
+        nickFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        nickFrame:SetScript("OnEvent", function(self, event)
+            local a = RegisterNSRTNicknames()
+            local b = RegisterTRNicknames()
+            -- Anything not loaded by first PLAYER_ENTERING_WORLD is not coming.
+            if (a and b) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
         end)
     end
 

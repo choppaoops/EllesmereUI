@@ -10327,14 +10327,14 @@ initFrame:SetScript("OnEvent", function(self)
             end
             -- Wipe spell assignments for the current spec so the init
             -- snapshot re-populates from Blizzard's CDM. Spell data lives
-            -- in EllesmereUIDB, not the AceDB profile, so ResetProfile
-            -- doesn't touch it. Only clear current spec to preserve other
-            -- specs' customizations.
-            if EllesmereUIDB and EllesmereUIDB.spellAssignments
-               and EllesmereUIDB.spellAssignments.specProfiles then
-                local specKey = ns and ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-                if specKey and specKey ~= "0" then
-                    EllesmereUIDB.spellAssignments.specProfiles[specKey] = nil
+            -- in EllesmereUIDB (per-profile store), not the AceDB profile, so
+            -- ResetProfile doesn't touch it. Only clear the ACTIVE profile's
+            -- current spec to preserve other specs and other profiles.
+            if ns and ns.GetActiveSpecProfiles then
+                local sp = ns.GetActiveSpecProfiles()
+                local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+                if sp and specKey and specKey ~= "0" then
+                    sp[specKey] = nil
                 end
             end
             ReloadUI()

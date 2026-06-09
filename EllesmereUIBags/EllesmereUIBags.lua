@@ -721,7 +721,14 @@ local function CreateHeader()
                         end
                     end
                 end
-                -- Find a pair to merge: smallest partial -> largest partial
+                -- Merge ONE pair per itemID this pass (smallest partial -> largest).
+                -- Distinct itemIDs live in distinct slots, so issuing every itemID's
+                -- merge in the same frame never conflicts; we then wait a single
+                -- BAG_UPDATE and repeat for anything still partial. Converges in a few
+                -- rounds (max partials-per-item) instead of one merge per round, which
+                -- was the dominant cause of the multi-second sort lockout. (Previously
+                -- this `break`-ed after the first merge -> one 0.15s+BAG_UPDATE round
+                -- per partial stack, i.e. dozens of serial rounds on a full bag.)
                 local merged = false
                 for _, partials in pairs(stacks) do
                     if #partials >= 2 then
@@ -735,7 +742,6 @@ local function CreateHeader()
                             C_Container.PickupContainerItem(dst.bag, dst.slot)
                             ClearCursor()
                             merged = true
-                            break  -- one merge per pass, wait for BAG_UPDATE
                         end
                     end
                 end
