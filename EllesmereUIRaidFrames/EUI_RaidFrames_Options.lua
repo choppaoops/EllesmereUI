@@ -4990,6 +4990,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         local debuffGrowValues = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down", CENTER = "Center" }
         local debuffGrowOrder = { "RIGHT", "LEFT", "UP", "DOWN", "CENTER" }
+		local debuffWrapValues = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
+        local debuffWrapOrder = { "RIGHT", "LEFT", "UP", "DOWN" }
 
         local function GetDefaultDebuffGrow(pos)
             if pos == "right" or pos == "topright" or pos == "bottomright" then return "LEFT" end
@@ -5053,6 +5055,25 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Show Debuffs",
               getValue=function() return SVal("debuffHideTooltips", true) end,
               setValue=function(v) SSet("debuffHideTooltips", v) end });  y = y - h
+			  
+		-- Row 4: Per Row (1 = single line, no wrap) | Wrap Direction
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Per Row", min=1, max=8, step=1,
+              disabled=function() return SVal("debuffFilter", "all") == "none" end,
+              disabledTooltip="Show Debuffs",
+              getValue=function() return SVal("debuffPerRow", 1) end,
+              setValue=function(v) SSet("debuffPerRow", v); EllesmereUI:RefreshPage() end },
+            { type="dropdown", text="Wrap Direction", values=debuffWrapValues, order=debuffWrapOrder,
+              disabled=function()
+                  return SVal("debuffFilter", "all") == "none"
+                      or (SVal("debuffPerRow", 1) or 1) <= 1
+              end,
+              disabledTooltip=function()
+                  if SVal("debuffFilter", "all") == "none" then return "Show Debuffs" end
+                  return "Per Row more than 1"
+              end,
+              getValue=function() return SVal("debuffWrapDirection", "UP") end,
+              setValue=function(v) SSet("debuffWrapDirection", v) end });  y = y - h
 
         -------------------------------------------------------------------
         --  DEBUFF STYLE

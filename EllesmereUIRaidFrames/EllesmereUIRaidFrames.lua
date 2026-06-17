@@ -599,6 +599,8 @@ local defaults = {
         debuffOffsetX    = 0,
         debuffOffsetY    = 0,
         debuffGrowDirection = "LEFT",
+		debuffPerRow     = 1,	-- icons per row (1 = single line, no wrap; >= 2 wraps)
+        debuffWrapDirection = "UP",
         debuffSpacing    = 1,
         debuffBorderSize = 1,
         debuffBorderColor = { r = 0, g = 0, b = 0 },
@@ -1942,6 +1944,81 @@ local function UpdateAbsorb(button, unit)
     end
 end
 
+
+-------------------------------------------------------------------------------
+--  Debuff grid layout (shared by the live render and the options preview)
+-------------------------------------------------------------------------------
+-- Mirrors the Buff Manager's AnchorSimpleGrid.
+function ns.DebuffGridPoint(s, idx0, total)
+    local pos    = s.debuffPosition or "bottomleft"
+    local grow   = s.debuffGrowDirection or "RIGHT"
+    local sz     = s.debuffSize or 18
+    local spc    = PixelSnap(s.debuffSpacing or 1)
+    local step   = sz + spc
+    local ox     = s.debuffOffsetX or 0
+    local oy     = s.debuffOffsetY or 0
+    local perRow = s.debuffPerRow or 1
+    if perRow < 1 then perRow = 1 end
+
+    -- Icon corner anchored to the same corner of the health bar. Every position
+    -- is handled explicitly so the default fallback is only a safety net.
+    local corner = "BOTTOMLEFT"
+    if     pos == "topleft"     then corner = "TOPLEFT"
+    elseif pos == "top"         then corner = "TOP"
+    elseif pos == "topright"    then corner = "TOPRIGHT"
+    elseif pos == "left"        then corner = "LEFT"
+    elseif pos == "center"      then corner = "CENTER"
+    elseif pos == "right"       then corner = "RIGHT"
+    elseif pos == "bottomleft"  then corner = "BOTTOMLEFT"
+    elseif pos == "bottom"      then corner = "BOTTOM"
+    elseif pos == "bottomright" then corner = "BOTTOMRIGHT"
+    end
+
+    -- Growth vector (per column within a row), screen coords (+x right, +y up).
+    -- CENTER grows horizontally like RIGHT but centers each row on the anchor.
+    local horizontal = (grow ~= "UP" and grow ~= "DOWN")
+    local gvx, gvy = 0, 0
+    if     grow == "LEFT" then gvx = -1
+    elseif grow == "UP"   then gvy = 1
+    elseif grow == "DOWN" then gvy = -1
+    else                       gvx = 1   -- RIGHT or CENTER
+    end
+
+    -- Row-stack vector (perpendicular). Explicit wrap direction wins; otherwise
+    -- auto-derive away from the anchored edge.
+    local svx, svy = 0, 0
+    local wrap = s.debuffWrapDirection
+    if     wrap == "UP"    then svy = 1
+    elseif wrap == "DOWN"  then svy = -1
+    elseif wrap == "RIGHT" then svx = 1
+    elseif wrap == "LEFT"  then svx = -1
+    elseif horizontal then
+        if pos == "bottomleft" or pos == "bottom" or pos == "bottomright" then svy = 1 else svy = -1 end
+    else
+        if pos == "topright" or pos == "right" or pos == "bottomright" then svx = -1 else svx = 1 end
+    end
+
+    -- perRow == 1 is a single line ALONG the growth direction (no wrapping), so
+    -- the growth control stays meaningful; >= 2 wraps into rows.
+    local row, col
+    if perRow <= 1 then
+        row, col = 0, idx0
+    else
+        row = floor(idx0 / perRow)
+        col = idx0 % perRow
+    end
+    local centerOff = 0
+    if grow == "CENTER" then
+        local rowCount = (perRow <= 1) and (total or 0) or min(perRow, max(0, (total or 0) - row * perRow))
+        if rowCount > 0 then centerOff = -((rowCount - 1) * step) / 2 end
+    end
+    local along  = col * step
+    local across = row * step
+    local fx = ox + gvx * along + svx * across + centerOff
+    local fy = oy + gvy * along + svy * across
+    return corner, fx, fy
+end
+
 -------------------------------------------------------------------------------
 --  Style a single button (called once per button at creation time)
 -------------------------------------------------------------------------------
@@ -2475,61 +2552,17 @@ local function StyleButton(button)
         d.debuffIcons[i] = icon
     end
 
-    -- Anchor debuff icons based on position + growth direction
-    -- Anchor debuff icons. For CENTER growth, call with visibleCount to
-    -- dynamically center the row based on how many icons are actually shown.
+    -- Anchor debuff icons in a grid (position + growth + per-row wrap) via the
+    -- shared DebuffGridPoint helper, which mirrors the Buff Manager's
+    -- AnchorSimpleGrid. For CENTER growth, call with visibleCount so each row
+    -- centers on how many icons are actually shown.
     local function AnchorDebuffs(visibleCount)
-        local pos = s.debuffPosition or "bottomleft"
-        local ox = s.debuffOffsetX or 0
-        local oy = s.debuffOffsetY or 0
-        local grow = s.debuffGrowDirection or "RIGHT"
-        local sz = s.debuffSize or 18
-        local spc = PixelSnap(s.debuffSpacing or 1)
-        local spacing = sz + spc
-
-        -- CENTER growth: offset so visible icons are centered on anchor
-        local centerOff = 0
-        if grow == "CENTER" and visibleCount and visibleCount > 0 then
-            centerOff = -((visibleCount - 1) * spacing) / 2
-        end
+        local total = visibleCount or #d.debuffIcons
 
         for i, icon in ipairs(d.debuffIcons) do
             icon:ClearAllPoints()
-            if i == 1 then
-                local fx = ox + (grow == "CENTER" and centerOff or 0)
-                -- Debuffs anchor flush to the health bar edge (no 1px inset), so
-                -- the bottom positions sit level with the edge like the role icon.
-                if pos == "topleft" then
-                    icon:SetPoint("TOPLEFT", health, "TOPLEFT", fx, oy)
-                elseif pos == "top" then
-                    icon:SetPoint("TOP", health, "TOP", fx, oy)
-                elseif pos == "topright" then
-                    icon:SetPoint("TOPRIGHT", health, "TOPRIGHT", fx, oy)
-                elseif pos == "left" then
-                    icon:SetPoint("LEFT", health, "LEFT", fx, oy)
-                elseif pos == "center" then
-                    icon:SetPoint("CENTER", health, "CENTER", fx, oy)
-                elseif pos == "right" then
-                    icon:SetPoint("RIGHT", health, "RIGHT", fx, oy)
-                elseif pos == "bottomright" then
-                    icon:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", fx, oy)
-                elseif pos == "bottom" then
-                    icon:SetPoint("BOTTOM", health, "BOTTOM", fx, oy)
-                else -- bottomleft
-                    icon:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", fx, oy)
-                end
-            else
-                local prev = d.debuffIcons[i - 1]
-                if grow == "RIGHT" or grow == "CENTER" then
-                    icon:SetPoint("LEFT", prev, "RIGHT", spc, 0)
-                elseif grow == "LEFT" then
-                    icon:SetPoint("RIGHT", prev, "LEFT", -spc, 0)
-                elseif grow == "UP" then
-                    icon:SetPoint("BOTTOM", prev, "TOP", 0, spc)
-                elseif grow == "DOWN" then
-                    icon:SetPoint("TOP", prev, "BOTTOM", 0, -spc)
-                end
-            end
+            local corner, fx, fy = ns.DebuffGridPoint(s, i - 1, total)
+            icon:SetPoint(corner, health, corner, fx, fy)
         end
     end
     AnchorDebuffs()
@@ -7904,7 +7937,8 @@ do
         debuffDisplay = {
             "debuffFilter", "hideLustDebuff",
             "debuffPosition", "debuffOffsetX", "debuffOffsetY",
-            "debuffGrowDirection", "debuffCap", "debuffHideTooltips",
+            "debuffGrowDirection", "debuffPerRow", "debuffWrapDirection",
+            "debuffCap", "debuffHideTooltips",
         },
         debuffStyle = {
             "debuffSize", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",
@@ -8814,6 +8848,20 @@ end
 -- Position a preview aura icon on a frame (reuses anchor logic)
 local function PvAuraAnchor(icon, f, auraType, slot, totalShown)
     local s2 = PvSettings()
+	
+    -- Debuffs use the shared grid layout (same DebuffGridPoint helper as the live
+    -- frames) so the preview matches exactly -- including row wrapping and CENTER
+    -- per-row centering. `slot` is the 0-based index among visible icons.
+    if auraType ~= "def" and auraType ~= "pa" then
+        local sz = s2.debuffSize or 18
+        icon:SetSize(sz, sz)
+        icon:ClearAllPoints()
+        local corner, fx, fy = ns.DebuffGridPoint(s2, slot, totalShown)
+        icon:SetPoint(corner, f._health, corner, fx, fy)
+        return
+    end
+
+    -- Defensives / private auras: single-line relative chaining (no wrapping).
     local pos, ox, oy, grow, sz, spc
     if auraType == "def" then
         pos = s2.defPosition or "center"
@@ -8822,20 +8870,13 @@ local function PvAuraAnchor(icon, f, auraType, slot, totalShown)
         grow = s2.defGrowDirection or "CENTER"
         sz = s2.defSize or 22
         spc = PixelSnap(s2.defSpacing or 1)
-    elseif auraType == "pa" then
+    else -- pa
         pos = s2.paPosition or "bottomleft"
         ox = s2.paOffsetX or 0
         oy = s2.paOffsetY or 0
         grow = s2.paGrowDirection or "RIGHT"
         sz = s2.paSize or 18
         spc = PixelSnap(s2.paSpacing or 1)
-    else
-        pos = s2.debuffPosition or "bottomleft"
-        ox = s2.debuffOffsetX or 0
-        oy = s2.debuffOffsetY or 0
-        grow = s2.debuffGrowDirection or "RIGHT"
-        sz = s2.debuffSize or 18
-        spc = PixelSnap(s2.debuffSpacing or 1)
     end
     local spacing = sz + spc
     local centerOff = 0
@@ -8860,10 +8901,8 @@ local function PvAuraAnchor(icon, f, auraType, slot, totalShown)
         end
     else
         -- Chain from previous icon in same pool
-        local pool = auraType == "def" and f._pvDefs
-            or auraType == "pa" and f._pvPA
-            or f._pvDebuffs
-        local prev = pool[slot] -- slot is 1-based, current is slot+1
+        local pool = (auraType == "def") and f._pvDefs or f._pvPA
+        local prev = pool[slot] -- slot is 0-based; current is slot+1, prev is pool[slot]
         if prev and prev:IsShown() then
             if grow == "RIGHT" or grow == "CENTER" then
                 icon:SetPoint("LEFT", prev, "RIGHT", spc, 0)
@@ -9096,9 +9135,11 @@ local function PvAuraTick()
             pulseInfo = ns._pvActiveAuras[pulseKey]
         end
         if pulseInfo.active and pulseInfo.expTime and pulseInfo.expTime <= now then
-            -- Pulse expired: hide slot 1 on all frames
+            -- Pulse expired: hide slot 1 on all frames. While wrapping is on,
+            -- skip the player frame (index 1) -- it's a dedicated full showcase
+            -- (filled below) so its slots stay put instead of pulsing.
             local pf = PvFrames()
-            for fi = 1, #pf do
+            for fi = (((s2.debuffPerRow or 1) > 1) and 2 or 1), #pf do
                 local f = pf[fi]
                 if f and f._pvDebuffs and f._pvDebuffs[1] then
                     f._pvDebuffs[1]:Hide()
@@ -9114,10 +9155,11 @@ local function PvAuraTick()
             pulseInfo.nextPulse = now + 15  -- 15s gap before next pulse
         end
         if not pulseInfo.active and now >= (pulseInfo.nextPulse or 0) then
-            -- Apply 10s debuff to all frames
+            -- Apply 10s debuff to all frames (skip the player showcase frame 1
+            -- while wrapping is on; it owns its own debuff slots, filled below).
             local dur = 10
             local pf = PvFrames()
-            for fi = 1, #pf do
+            for fi = (((s2.debuffPerRow or 1) > 1) and 2 or 1), #pf do
                 local key = fi .. ":db:1"
                 local f = pf[fi]
                 if f and f._pvDebuffs and f._pvDebuffs[1] and f._health then
@@ -9161,6 +9203,30 @@ local function PvAuraTick()
             end
             pulseInfo.active = true
             pulseInfo.expTime = now + dur
+        end
+		
+        -- Row-wrap showcase: when wrapping is enabled, fill the player frame
+        -- (index 1) up to debuffCap so the full multi-row layout is actually
+        -- visible -- the ambient pulse/random spawns only put 1-2 per frame,
+        -- which can't demonstrate wrapping. Slots 2+ loop on their own (see the
+        -- expiry pass); slot 1 is re-topped here since the pulse skips frame 1.
+        if (s2.debuffPerRow or 1) > 1 then
+            local cap = s2.debuffCap or 3
+            local f1 = PvFrames()[1]
+            if f1 and f1._pvDebuffs then
+                local changed = false
+                for slot = 1, cap do
+                    if f1._pvDebuffs[slot] then
+                        local key = "1:db:" .. slot
+                        local info = ns._pvActiveAuras[key]
+                        if not (info and info.expTime > now) then
+                            PvAuraApply(1, "db", slot)
+                            changed = true
+                        end
+                    end
+                end
+                if changed then PvAuraReanchorFrame(1, "db") end
+            end
         end
     end
 
@@ -10106,9 +10172,10 @@ local function CreatePreviewFrame(index)
         return di
     end
 
-    -- Debuff preview icons
+    -- Debuff preview icons. Pool sized to the max debuffCap (8) so the player
+    -- frame can showcase a full wrapping layout; only a few are shown otherwise.
     f._pvDebuffs = {}
-    for i = 1, 3 do
+    for i = 1, 8 do
         f._pvDebuffs[i] = MakePreviewAuraIcon(f, f:GetFrameLevel() + ns.LVL_AURA, s.debuffSize or 18)
     end
 
