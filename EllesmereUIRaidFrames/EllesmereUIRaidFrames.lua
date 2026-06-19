@@ -543,8 +543,9 @@ local defaults = {
         dispelBorderSize = 0,
         dispelOverlay    = "fill",   -- "none", "fill", "full", "gradient"
         dispelOverlayOpacity = 100,
-        dispelShowAll        = true,   -- true = highlight any dispellable debuff; false = only player-dispellable
-        showDispelIcons  = false,
+        dispelShowAll             = true,   -- true = highlight any dispellable debuff; false = only player-dispellable
+        dispelOverlayPosition     = 0,      -- 0=Top, 1=Bottom, 2=Left (aura-organization-type for private aura dispel container)
+        showDispelIcons       = false,
         dispelIconPosition = "right",
         dispelIconOffsetX  = 0,
         dispelIconOffsetY  = 0,
@@ -2329,7 +2330,7 @@ local function StyleButton(button)
         -- the wider set, otherwise we restrict it to what this character can remove.
         -- Re-applied in RegisterDispelContainer so the setting survives a reload.
         dcWrapper:SetAttribute("dispel-indicator-option", (s.dispelShowAll ~= false) and 2 or 1)
-        dcWrapper:SetAttribute("aura-organization-type", 0)   -- 0 = top-down growth
+        dcWrapper:SetAttribute("aura-organization-type", s.dispelOverlayPosition or 0)   -- 0=Top, 1=Bottom, 2=Left
         dcWrapper:SetAttribute("always-hide-duration", true)
         dcWrapper:SetAttribute("set-aura-size-to-icon-size", true)
         dcWrapper:SetAttribute("icon-size", 12)
@@ -4120,6 +4121,7 @@ local function RegisterDispelContainer(button, unit)
     -- Re-apply dispel mode (follows dispelShowAll; runs on reload so the toggle takes effect)
     local s = (groupType == 4) and ns._scaledPartyProxy or ns._scaledProfile
     wrapper:SetAttribute("dispel-indicator-option", (s and s.dispelShowAll ~= false) and 2 or 1)
+    wrapper:SetAttribute("aura-organization-type", s and s.dispelOverlayPosition or 0)   -- 0=Top, 1=Bottom, 2=Left
     wrapper:SetAttribute("update-settings", true)
 
     -- Apply strata fix (12.0.5 container rendering workaround)
