@@ -323,7 +323,7 @@ initFrame:SetScript("OnEvent", function(self)
             if coordInitOff then coordCogBlock:Show() else coordCogBlock:Hide() end
         end
 
-        -- Row 6: Hide Error Messages (left) |
+        -- Row 6: Hide Error Messages (left) | Hide Tutorial Pop-ups (right)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Error Messages",
               tooltip="Hides most red error messages (such as 'Not enough rage' or 'Ability is not ready yet'). Important errors like a full bag or quest log are still shown.",
@@ -335,7 +335,16 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.hideErrorMessages = v
                   if EllesmereUI._applyHideErrorMessages then EllesmereUI._applyHideErrorMessages() end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Hide Tutorial Pop-ups",
+              tooltip="Hides Blizzard's tutorial UI: the yellow HelpTip bubbles and the glowing (i) help-plate buttons on the spellbook, talents, map, collections, and other panels.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.hideTutorials or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.hideTutorials = v
+                  if EllesmereUI._applyHideTutorials then EllesmereUI._applyHideTutorials() end
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
