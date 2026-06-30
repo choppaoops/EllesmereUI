@@ -5697,7 +5697,7 @@ initFrame:SetScript("OnEvent", function(self)
                         lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                         lbl:SetPoint("LEFT", 10, 0)
                         lbl:SetJustifyH("LEFT")
-                        lbl:SetText(label)
+                        lbl:SetText(EllesmereUI.L(label))
 
                         -- Optional disabled state (opts.disabled = function -> bool):
                         -- greys the row, blocks the flyout, and shows a tooltip.
@@ -5779,7 +5779,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 sLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                                 sLbl:SetPoint("LEFT", 10, 0)
                                 sLbl:SetJustifyH("LEFT")
-                                sLbl:SetText(item.label)
+                                sLbl:SetText(EllesmereUI.L(item.label))
 
                                 -- Highlight selected item. Charge entries are
                                 -- independent toggles (item.charge names the ss
