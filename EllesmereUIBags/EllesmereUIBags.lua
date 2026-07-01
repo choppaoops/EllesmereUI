@@ -2368,7 +2368,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
 
         -- Bind Type : BoE / WuE bottom-left (gear only)
         if btn.BindTypeText then
-            if data._isGear then
+            if data._isGear and not data.info.isBound then
                 local showBindType = BP().bagDisplayBindType ~= false
                 if showBindType then
                     local r, g, b = 1, 1, 1
