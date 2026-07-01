@@ -1521,21 +1521,16 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateChCogState()
         end
 
-        -- Color Out of Melee Range (toggle + inline color picker)
+        -- Color Out of Range (toggle + inline color picker)
         local meleeRow
         meleeRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Color Out of Melee Range",
+            { type="toggle", text="Color Out of Range",
               tooltip=function()
-                  local sid
-                  if PlayerUtil and PlayerUtil.GetCurrentSpecID then
-                      sid = PlayerUtil.GetCurrentSpecID()
-                  elseif GetSpecialization then
-                      local idx = GetSpecialization()
-                      if idx then sid = (GetSpecializationInfo(idx)) end
+                  local s = EllesmereUI.L("Changes the crosshair color when your current target is out of range.")
+                  if EllesmereUI._getCrosshairCutoffRange then
+                      local range = EllesmereUI._getCrosshairCutoffRange()
+                      s = s .. " " .. EllesmereUI.Lf("Currently active range cutoff: %1$syd.", range)
                   end
-                  local s = "Changes the crosshair colour when your current target is out of melee range."
-                  if sid == 65 then s = s .. " Holy uses Hammer of Justice (10yd)." end
-				  if sid == 1480 then s = s .. " Devourer uses Consume (25yd)." end
                   return s
               end,
               disabled=function() return crosshairOff() end,
@@ -1572,7 +1567,7 @@ initFrame:SetScript("OnEvent", function(self)
             mcBlock:SetFrameLevel(mcSwatch:GetFrameLevel() + 10)
             mcBlock:EnableMouse(true)
             mcBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(mcSwatch, EllesmereUI.DisabledTooltip("Color Out of Melee Range"))
+                EllesmereUI.ShowWidgetTooltip(mcSwatch, EllesmereUI.DisabledTooltip("Color Out of Range"))
             end)
             mcBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
