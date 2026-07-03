@@ -235,7 +235,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local DK_BLOOD = {
         { name="EUI_DnDCursor", icon="Interface\\Icons\\spell_shadow_deathanddecay", label="Death and Decay\n(Cursor)", fixedBody="/cast [@cursor] Death and Decay", fixedTooltip="Death and Decay" },
         { name="EUI_GorefiendCursor", icon="Interface\\Icons\\ability_deathknight_aoedeathgrip", label="Gorefiend's Grasp\n(Cursor)", fixedBody="/cast [@cursor] Gorefiend's Grasp", fixedTooltip="Gorefiend's Grasp" },
-        { name="EUI_AbomLimb", icon="Interface\\Icons\\ability_deathknight_intovoidtentacles", label="Abomination Limb\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Abomination Limb", fixedTooltip="Abomination Limb" },
+        { name="EUI_AbomLimb", icon="Interface\\Icons\\ability_maldraxxus_deathknight", label="Abomination Limb\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Abomination Limb", fixedTooltip="Abomination Limb" },
     }
     local DK_FROST = {
         { name="EUI_PFObliterate", icon="Interface\\Icons\\spell_deathknight_pillaroffrost", label="PF Obliterate", fixedBody="/cast Pillar of Frost\n/cast Obliterate\n/cast Raise Dead" },
