@@ -275,12 +275,13 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local sidebarVisOrder = { "always", "mouseover", "never" }
         local sidebarIconItems = {
-            { key = "showFriends",  label = "Friends" },
-            { key = "showCopy",     label = "Copy Chat" },
-            { key = "showPortals",  label = "M+ Portals" },
-            { key = "showVoice",    label = "Voice/Channels" },
-            { key = "showSettings", label = "Settings" },
-            { key = "showScroll",   label = "Scroll to Bottom" },
+            { key = "showFriends",    label = "Friends" },
+            { key = "showDurability", label = "Durability" },
+            { key = "showCopy",       label = "Copy Chat" },
+            { key = "showPortals",    label = "M+ Portals" },
+            { key = "showVoice",      label = "Voice/Channels" },
+            { key = "showSettings",   label = "Settings" },
+            { key = "showScroll",     label = "Scroll to Bottom" },
         }
         local sidebarRow
         sidebarRow, h = W:DualRow(parent, y,
