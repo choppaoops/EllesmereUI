@@ -1185,7 +1185,7 @@ initFrame:SetScript("OnEvent", function(self)
         local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
             rgn, row:GetFrameLevel() + 3,
             function()
-                return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                return EllesmereUI.ResolveActiveAccent()
             end,
             function()
                 WSLookSet(key, "useCustom", false)
@@ -1788,7 +1788,7 @@ initFrame:SetScript("OnEvent", function(self)
               swatches = {
                   { tooltip = "Accent Color",
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()

@@ -153,7 +153,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Build the sort menu
         local MH = 26       -- row height
         local DH = 16       -- divider height
-        local EG = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
+        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
 
         local menuFrame = CreateFrame("Frame", nil, UIParent)
         menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1884,7 +1884,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { tooltip = "Accent Color",
                   hasAlpha = false,
                   getValue = function()
-                      return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                      return EllesmereUI.ResolveActiveAccent()
                   end,
                   setValue = function() end,
                   onClick = function()
@@ -2010,7 +2010,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Accent color (leftmost).
             AddHTSwatch(
                 function()
-                    local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    local r, g, b = EllesmereUI.ResolveActiveAccent()
                     return r or 1, g or 1, b or 1, 1
                 end,
                 function() end, "accent", false, "Accent Color")
@@ -2125,7 +2125,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Accent color (leftmost).
             AddHASwatch(
                 function()
-                    local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    local r, g, b = EllesmereUI.ResolveActiveAccent()
                     return r or 1, g or 1, b or 1, 1
                 end,
                 function() end, "accent", false, "Accent Color")
@@ -6068,7 +6068,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local PP = EllesmereUI.PanelPP or EllesmereUI.PP
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
-        local accentColor = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
+        local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
         local s = db.profile
 
         -- Dimmer
@@ -6246,7 +6246,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- Glow effect
                                 C_Timer.After(0.15, function()
                                     if not target:IsShown() then return end
-                                    local ac = EllesmereUI.ACCENT_COLOR or EllesmereUI.ELLESMERE_GREEN
+                                    local ac = EllesmereUI.ELLESMERE_GREEN
                                     if not ac then return end
                                     local glow = CreateFrame("Frame", nil, target)
                                     glow:SetAllPoints()

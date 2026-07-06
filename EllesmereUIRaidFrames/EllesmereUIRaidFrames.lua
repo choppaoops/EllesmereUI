@@ -1523,7 +1523,7 @@ local function GetNameColor(unit, s)
     s = s or db.profile
     local mode = s.nameColorMode or "class"
     if mode == "accent" then
-        local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        local r, g, b = EllesmereUI.ResolveActiveAccent()
         if r then return r, g, b end
         return 1, 1, 1
     elseif mode == "custom" then
@@ -1630,7 +1630,7 @@ local function GetHealthTextColor(unit, s)
     s = s or db.profile
     local mode = s.healthTextColorMode or "custom"
     if mode == "accent" then
-        local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        local r, g, b = EllesmereUI.ResolveActiveAccent()
         if r then return r, g, b end
         return 1, 1, 1
     elseif mode == "class" then
@@ -1652,7 +1652,7 @@ function ns.GetHealAbsorbTextColor(unit, s)
     s = s or db.profile
     local mode = s.healAbsorbTextColorMode or "custom"
     if mode == "accent" then
-        local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        local r, g, b = EllesmereUI.ResolveActiveAccent()
         if r then return r, g, b end
         return 1, 0.3, 0.3
     elseif mode == "class" then
@@ -6487,7 +6487,7 @@ FB.SetMoverShown = function(owner, show, frameName, labelText)
         local mbg = m:CreateTexture(nil, "BACKGROUND")
         mbg:SetAllPoints()
         mbg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
-        local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
         if EllesmereUI.MakeBorder then
             EllesmereUI.MakeBorder(m, ar or 1, ag or 1, ab or 1, 0.6)
         end
@@ -12673,7 +12673,7 @@ local function ApplyPreviewData(f, index)
         ApplyFont(f._nameText, s.nameSize or 10)
         local nameMode = s.nameColorMode or "class"
         if nameMode == "accent" then
-            local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+            local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
             if ar then f._nameText:SetTextColor(ar, ag, ab)
             else f._nameText:SetTextColor(1, 1, 1) end
         elseif nameMode == "custom" then
@@ -12744,7 +12744,7 @@ local function ApplyPreviewData(f, index)
         local htMode = s.healthTextColorMode or "custom"
         local htr, htg, htb = 1, 1, 1
         if htMode == "accent" then
-            local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+            local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
             if ar then htr, htg, htb = ar, ag, ab end
         elseif htMode == "class" then
             local cc = EllesmereUI.GetClassColor(classToken)
@@ -12792,7 +12792,7 @@ local function ApplyPreviewData(f, index)
             local haCM = s.healAbsorbTextColorMode or "custom"
             local hr, hg, hb = 1, 0.3, 0.3
             if haCM == "accent" then
-                local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
                 if ar then hr, hg, hb = ar, ag, ab end
             elseif haCM == "class" then
                 local cc = EllesmereUI.GetClassColor(classToken)

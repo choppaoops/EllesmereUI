@@ -233,7 +233,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { tooltip = "Accent Color",
                   hasAlpha = false,
                   getValue = function()
-                      local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                      local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
                       return ar, ag, ab
                   end,
                   setValue = function() end,
@@ -346,7 +346,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, rgn:GetFrameLevel() + 5,
                 function()
-                    local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
                     return ar, ag, ab, 1
                 end,
                 function() end, false, 18)

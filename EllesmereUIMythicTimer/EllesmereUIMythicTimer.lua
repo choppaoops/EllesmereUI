@@ -1032,8 +1032,8 @@ local function SetThreshText(fs, text)
 end
 
 local function GetAccentColor()
-    if EllesmereUI.ResolveThemeColor and EllesmereUI.GetActiveTheme then
-        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+    if EllesmereUI.ResolveActiveAccent then
+        return EllesmereUI.ResolveActiveAccent()
     end
     return 0.05, 0.83, 0.62
 end

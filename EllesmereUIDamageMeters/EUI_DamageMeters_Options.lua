@@ -383,7 +383,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrRow2:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     Set("hdrTextUseAccent", true)
@@ -472,7 +472,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrRow2:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     Set("iconColorUseAccent", true)
@@ -584,7 +584,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1210,7 +1210,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1578,7 +1578,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1632,7 +1632,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, textRow:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     SHDB().textColorUseAccent = true

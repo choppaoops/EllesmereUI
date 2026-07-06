@@ -2932,7 +2932,7 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
     nameFS:SetText(playerName)
     local nameMode = s.nameColorMode or "class"
     if nameMode == "accent" then
-        local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
         if ar then nameFS:SetTextColor(ar, ag, ab) else nameFS:SetTextColor(1, 1, 1) end
     elseif nameMode == "custom" then
         local c = s.nameCustomColor or { r=1, g=1, b=1 }
@@ -3495,7 +3495,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             local accent = tile:CreateTexture(nil, "ARTWORK", nil, 2)
             accent:SetSize(2, TILE_H)
             accent:SetPoint("TOPLEFT", tile, "TOPLEFT", 0, 0)
-            local ac = EllesmereUI.ACCENT_COLOR
+            local ac = EllesmereUI.ELLESMERE_GREEN
             if ac then
                 accent:SetColorTexture(ac.r, ac.g, ac.b, 1)
             else
@@ -3590,7 +3590,8 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         local function UpdateToggleVisual()
             toggleKnob:ClearAllPoints()
             if ind.enabled then
-                toggleBg:SetColorTexture(0.05, 0.65, 0.45, 1)
+                local acr, acg, acb = EllesmereUI.ResolveActiveAccent()
+                toggleBg:SetColorTexture(acr, acg, acb, 1)
                 toggleKnob:SetPoint("RIGHT", toggleBtn, "RIGHT", -2, 0)
                 toggleKnob:SetColorTexture(1, 1, 1, 1)
             else
@@ -3682,9 +3683,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         addBtn:SetPoint("TOP", sidebarFrame, "TOPLEFT", floor(sidebarW / 2), tileY - ADD_BTN_PAD)
         addBtn:SetFrameLevel(sidebarFrame:GetFrameLevel() + 1)
 
+        local accentColor = EllesmereUI.ELLESMERE_GREEN
         local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
         addBg:SetAllPoints()
-        addBg:SetColorTexture(0.05, 0.52, 0.39, 0.8)
+        addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
 
         local addLabel = addBtn:CreateFontString(nil, "OVERLAY")
         addLabel:SetFont(fontPath, 12, "")
@@ -3693,10 +3695,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         addLabel:SetTextColor(1, 1, 1)
 
         addBtn:SetScript("OnEnter", function()
-            addBg:SetColorTexture(0.07, 0.62, 0.49, 1)
+            addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 1)
         end)
         addBtn:SetScript("OnLeave", function()
-            addBg:SetColorTexture(0.05, 0.52, 0.39, 0.8)
+            addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
         end)
 
         addBtn:SetScript("OnClick", function(self)
@@ -3867,14 +3869,14 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 cBtn:SetFrameLevel(popup:GetFrameLevel() + 1)
                 local cBg = cBtn:CreateTexture(nil, "BACKGROUND")
                 cBg:SetAllPoints()
-                cBg:SetColorTexture(0.05, 0.52, 0.39, 0.8)
+                cBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
                 local cTx = cBtn:CreateFontString(nil, "OVERLAY")
                 cTx:SetPoint("CENTER")
                 cTx:SetFont(fontPath, 12, "")
                 cTx:SetText(EllesmereUI.L("Create"))
                 cTx:SetTextColor(1, 1, 1)
-                cBtn:SetScript("OnEnter", function() cBg:SetColorTexture(0.07, 0.62, 0.49, 1) end)
-                cBtn:SetScript("OnLeave", function() cBg:SetColorTexture(0.05, 0.52, 0.39, 0.8) end)
+                cBtn:SetScript("OnEnter", function() cBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 1) end)
+                cBtn:SetScript("OnLeave", function() cBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8) end)
                 cBtn:SetScript("OnClick", function()
                     if not selectedSpecKey then return end
                     if CountSpecIndicators(db, selectedSpecKey) >= MAX_PER_SPEC then return end
@@ -4224,7 +4226,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         nameFS:SetText(playerName)
         local nameMode = s.nameColorMode or "class"
         if nameMode == "accent" then
-            local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+            local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
             if ar then nameFS:SetTextColor(ar, ag, ab)
             else nameFS:SetTextColor(1, 1, 1) end
         elseif nameMode == "custom" then
@@ -4534,7 +4536,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
 
         -- Build title: accent "Icon Indicator: " + white "Rejuvenation, Lifebloom"
         local typeName = INDICATOR_TYPE_MAP[indType] and INDICATOR_TYPE_MAP[indType].name or indType
-        local ac2 = EllesmereUI.ACCENT_COLOR
+        local ac2 = EllesmereUI.ELLESMERE_GREEN
         if ac2 then
             settingsTitle:SetTextColor(ac2.r, ac2.g, ac2.b)
         else
