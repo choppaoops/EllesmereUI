@@ -7,7 +7,7 @@ local addon, ns = ...
 
 local GetFFD = EllesmereUI._GetFFD
 
-local ICON_ZOOM = 0.055  -- same crop used by totem bar
+local ICON_ZOOM = 0.055  -- fallback crop (same as totem bar); user values in profile
 
 -------------------------------------------------------------------------------
 --  Settings helper
@@ -51,7 +51,10 @@ local function SkinAuraButton(btn, isDebuff)
         end
     end
     if iconTex and iconTex.SetTexCoord then
-        iconTex:SetTexCoord(ICON_ZOOM, 1 - ICON_ZOOM, ICON_ZOOM, 1 - ICON_ZOOM)
+        local z
+        if isDebuff then z = cfg.debuffIconZoom else z = cfg.buffIconZoom end
+        z = z or ICON_ZOOM
+        iconTex:SetTexCoord(z, 1 - z, z, 1 - z)
     end
 
     -- Hide Blizzard border (alpha, not Hide, to avoid taint)

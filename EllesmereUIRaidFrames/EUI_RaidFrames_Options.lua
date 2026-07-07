@@ -3803,6 +3803,31 @@ initFrame:SetScript("OnEvent", function(self)
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsRaidIconSize", 24) end,
                   setValue=function(v) SSet("tsRaidIconSize", v); TSApply() end });  y = y - h
+            -- Inline cog on Icon Size: Icon Zoom
+            do
+                local rgn = row._rightRegion
+                local function TSOff() return SVal("tsRaidMode", "never") == "never" end
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Icon Zoom",
+                    rows = {
+                        { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                          get=function() return SVal("tsRaidIconZoom", 0.08) end,
+                          set=function(v) SSet("tsRaidIconZoom", v); TSApply() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(TSOff() and 0.15 or 0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) if not TSOff() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(TSOff() and 0.15 or 0.4) end)
+                cogBtn:SetScript("OnClick", function(self) if not TSOff() then cogShow(self) end end)
+                EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(TSOff() and 0.15 or 0.4) end)
+            end
 
             -- Row 2: Icon Position (+ cog for X/Y) | Growth Direction
             local tsPositionValues = {
@@ -5090,6 +5115,31 @@ initFrame:SetScript("OnEvent", function(self)
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsIconSize", 24) end,
                   setValue=function(v) SSet("tsIconSize", v); TSApply() end });  y = y - h
+            -- Inline cog on Icon Size: Icon Zoom
+            do
+                local rgn = row._rightRegion
+                local function TSOff() return SVal("tsMode", "whenHealing") == "never" end
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Icon Zoom",
+                    rows = {
+                        { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                          get=function() return SVal("tsIconZoom", 0.08) end,
+                          set=function(v) SSet("tsIconZoom", v); TSApply() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(TSOff() and 0.15 or 0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) if not TSOff() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(TSOff() and 0.15 or 0.4) end)
+                cogBtn:SetScript("OnClick", function(self) if not TSOff() then cogShow(self) end end)
+                EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(TSOff() and 0.15 or 0.4) end)
+            end
 
             -- Row 2: Icon Position (+ cog for X/Y) | Growth Direction
             local tsPositionValues = {
@@ -5382,8 +5432,9 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
-        -- Row 2: Growth Direction | Size
-        _, h = W:DualRow(parent, y,
+        -- Row 2: Growth Direction | Size (+ icon zoom cog)
+        local defSizeRow
+        defSizeRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Growth Direction", values=defGrowValues, order=defGrowOrder,
               disabled=DefDisabled, disabledTooltip="Show Defensives & Externals",
               getValue=function() return SVal("defGrowDirection", "CENTER") end,
@@ -5392,6 +5443,30 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=DefDisabled, disabledTooltip="Show Defensives & Externals",
               getValue=function() return SVal("defSize", 22) end,
               setValue=function(v) SSet("defSize", v) end });  y = y - h
+        -- Inline cog on Size: Icon Zoom
+        do
+            local rgn = defSizeRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SVal("defIconZoom", 0.08) end,
+                      set=function(v) SSet("defIconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(DefDisabled() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) if not DefDisabled() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(DefDisabled() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) if not DefDisabled() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(DefDisabled() and 0.15 or 0.4) end)
+        end
 
         -- Row 3: Spacing | Border Size (+ swatch)
         local defBdrRow
@@ -5825,6 +5900,31 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Show Debuffs",
               getValue=function() return SVal("debuffBorderSize", 1) end,
               setValue=function(v) SSet("debuffBorderSize", v) end });  y = y - h
+        -- Inline cog on Debuff Size: Icon Zoom
+        do
+            local rgn = dbBorderRow._leftRegion
+            local function DbOff() return SVal("debuffFilter", "all") == "none" end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SVal("debuffIconZoom", 0.08) end,
+                      set=function(v) SSet("debuffIconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(DbOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) if not DbOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(DbOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) if not DbOff() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(DbOff() and 0.15 or 0.4) end)
+        end
         -- Inline swatch for border color
         do
             local rgn = dbBorderRow._rightRegion

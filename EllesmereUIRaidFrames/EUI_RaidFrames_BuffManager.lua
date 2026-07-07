@@ -1547,6 +1547,8 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
             local icon = d.bmSimpleIcons[shown]
             icon:SetSize(sz, sz)
             icon._tex:SetTexture(tex or 136243)
+            local _z = bs.iconZoom or 0.08
+            icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
 
             local cd = icon._cooldown
             if cd then
@@ -1950,7 +1952,8 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 else
                                     f._tex:SetTexture(136243)
                                 end
-                                f._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                                local _z = db.profile.bmIconZoom or 0.08
+                                f._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
                                 f._tex:SetVertexColor(1, 1, 1, iconAlpha)
                                 ncR, ncG, ncB, ncA = 1, 1, 1, iconAlpha
                             else -- square
@@ -2639,7 +2642,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                     fr:SetAlpha(pvAlpha)
                                     if indType == "icon" then
                                         fr._tex:SetTexture(GetSpellIcon(sid))
-                                        fr._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                                        local _z = s.bmIconZoom or 0.08
+                                        fr._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
                                         fr._tex:SetVertexColor(1, 1, 1, pvHideIcon and 0 or 1)
                                     else
                                         -- Per-ability color (preview): this spell's
@@ -3056,6 +3060,8 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
             end
             icon:SetSize(sz, sz)
             icon._tex:SetTexture(exampleIcons[i] or 136243)
+            local _z = bs.iconZoom or 0.08
+            icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
             if icon._borderFrame and PP then
                 local bdrSz = bs.borderSize or 1
                 local bc = bs.borderColor or { r=0, g=0, b=0 }
@@ -3359,8 +3365,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
         end
 
-        -- Row 2: Growth Direction | Size
-        _, hh = W:DualRow(optsFrame, sy,
+        -- Row 2: Growth Direction | Size (+ icon zoom cog)
+        local row2
+        row2, hh = W:DualRow(optsFrame, sy,
             { type="dropdown", text="Growth Direction", values=GROW_VALUES, order=GROW_ORDER,
               disabled=BuffsOff, disabledTooltip="Show Buffs",
               getValue=function() return BVal("growDirection", "LEFT") end,
@@ -3369,6 +3376,29 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
               disabled=BuffsOff, disabledTooltip="Show Buffs",
               getValue=function() return BVal("size", 22) end,
               setValue=function(v) BSet("size", v) end });  sy = sy - hh
+        do
+            local rgn = row2._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return BVal("iconZoom", 0.08) end,
+                      set=function(v) BSet("iconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local function UpdCog() local off = BuffsOff(); cogBtn:SetAlpha(off and 0.15 or 0.4); cogBtn:EnableMouse(not off) end
+            cogBtn:SetScript("OnEnter", function(self) if not BuffsOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) UpdCog() end)
+            cogBtn:SetScript("OnClick", function(self) if not BuffsOff() then cogShow(self) end end)
+            UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
+        end
 
         -- Row 3: Spacing | Border Size (+ swatch)
         local row3
@@ -4997,8 +5027,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             -----------------------------------------------------------
             _, h = W:SectionHeader(leftFrame, "DISPLAY", sy); sy = sy - h
 
-            -- Row 1: Size | Spacing
-            SettingsRow(
+            -- Row 1: Size (+ icon zoom cog) | Spacing
+            local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
+            local sizeRow = SettingsRow(
                 { type="slider", text="Size", min=4, max=40, step=1,
                   getValue=function() return ind.size or 12 end,
                   setValue=function(v) ind.size = v; ReloadAndUpdate() end },
@@ -5006,8 +5037,33 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                   getValue=function() return ind.spacing or 1 end,
                   setValue=function(v) ind.spacing = v; ReloadAndUpdate() end })
 
+            -- Inline cog on Size: Icon Zoom (icon type only). One
+            -- profile-wide value shared by all icon indicators.
+            if indType == "icon" then
+                local rgn = sizeRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Icon Zoom",
+                    rows = {
+                        { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                          get=function() return ns.db.profile.bmIconZoom or 0.08 end,
+                          set=function(v) ns.db.profile.bmIconZoom = v; ReloadAndUpdate() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function UpdCog() local off = IconHidden(); cogBtn:SetAlpha(off and 0.15 or 0.4); cogBtn:EnableMouse(not off) end
+                cogBtn:SetScript("OnEnter", function(self) if not IconHidden() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) UpdCog() end)
+                cogBtn:SetScript("OnClick", function(self) if not IconHidden() then cogShow(self) end end)
+                UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
+            end
+
             -- Row 2: Opacity | Border (+ inline color swatch)
-            local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
             local bdrRow = SettingsRow(
                 { type="slider", text="Opacity", min=0, max=100, step=1,
                   disabled=IconHidden, disabledTooltip="Hide Icons",

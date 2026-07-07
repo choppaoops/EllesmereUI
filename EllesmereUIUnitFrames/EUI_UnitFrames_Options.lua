@@ -13348,7 +13348,7 @@ initFrame:SetScript("OnEvent", function(self)
     local ufSearchTerms = {}
     for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
     for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
-    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs" }
+    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom" }
     for _, t in ipairs(_paTerms) do ufSearchTerms[#ufSearchTerms + 1] = t end
 
     -- Rebuild preview when spec changes (class resource pips may appear/disappear)
@@ -13393,7 +13393,8 @@ initFrame:SetScript("OnEvent", function(self)
         parent._showRowDivider = true
 
         -- Row 1: Enable Styled Buffs & Debuffs | Icon Size
-        _, h = W:DualRow(parent, y,
+        local paRow1
+        paRow1, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Styled Buffs & Debuffs",
               getValue = function() return PAGet("enabled") or false end,
               setValue = function(v)
@@ -13410,6 +13411,35 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return PAGet("iconSize") or 32 end,
               setValue = function(v) PASet("iconSize", v) end }
         );  y = y - h
+
+        -- Inline cog: Icon Zoom (next to "Icon Size"). Buffs and debuffs
+        -- crop independently.
+        do
+            local rgn = paRow1._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type = "slider", label = "Buff Zoom", min = 0, max = 0.20, step = 0.01,
+                      get = function() return PAGet("buffIconZoom") or 0.055 end,
+                      set = function(v) PASet("buffIconZoom", v) end },
+                    { type = "slider", label = "Debuff Zoom", min = 0, max = 0.20, step = 0.01,
+                      get = function() return PAGet("debuffIconZoom") or 0.055 end,
+                      set = function(v) PASet("debuffIconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
 
         -- Row 2: Show Text | Text Size
         _, h = W:DualRow(parent, y,

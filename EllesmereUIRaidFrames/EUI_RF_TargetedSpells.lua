@@ -204,6 +204,8 @@ local function StyleIcon(icon)
     local k = raid and 1 or (ns._partyIndicatorScale or 1)
     local sz = Setting(raid, "IconSize", 24) * k
     icon:SetSize(sz, sz)
+    local z = Setting(raid, "IconZoom", 0.08)
+    icon._tex:SetTexCoord(z, 1 - z, z, 1 - z)
     if icon._borderFrame then
         local PP = EllesmereUI and (EllesmereUI.PanelPP or EllesmereUI.PP)
         if PP and PP.UpdateBorder then

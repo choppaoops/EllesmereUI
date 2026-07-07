@@ -4288,6 +4288,8 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
     else
         icon._tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
     end
+    local _z = s.debuffIconZoom or 0.08
+    icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
 
     -- A typed (dispellable) debuff carries a non-nil dispelName even when the
     -- name itself is a secret value (other players' debuffs inside instances);
@@ -4841,6 +4843,8 @@ local function UpdateDefensives(button, unit, updateInfo)
                 else
                     icon._tex:SetTexture(136243)
                 end
+                local _z = s.defIconZoom or 0.08
+                icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
 
                 -- Duration swipe + text (secret-safe via DurationObject + GetCountdownFontString)
                 local cd = icon._cooldown
@@ -9301,7 +9305,7 @@ do
         defensives = {
             "showDefensives", "showExternals",
             "defPosition", "defOffsetX", "defOffsetY", "defGrowDirection",
-            "defSize", "defSpacing", "defBorderSize", "defBorderColor",
+            "defSize", "defIconZoom", "defSpacing", "defBorderSize", "defBorderColor",
             "defShowSwipe", "defShowDurText", "defDurTextColor", "defDurTextSize", "defDurTextOffsetX", "defDurTextOffsetY",
         },
         privateAuras = {
@@ -9317,7 +9321,7 @@ do
             "dispellableDebuffOffsetX", "dispellableDebuffOffsetY",
         },
         debuffStyle = {
-            "debuffSize", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",
+            "debuffSize", "debuffIconZoom", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",
             "debuffShowStacks", "debuffStacksTextColor", "debuffStacksTextSize", "debuffStacksOffsetX", "debuffStacksOffsetY",
             "debuffShowSwipe", "debuffShowDurText", "debuffDurTextColor", "debuffDurTextSize", "debuffDurTextOffsetX", "debuffDurTextOffsetY",
         },
@@ -10366,6 +10370,15 @@ local function PvAuraApply(frameIndex, auraType, slotIndex)
     local startTime = GetTime()
 
     icon._tex:SetTexture(tex)
+    -- Private auras keep the fixed crop: live PA icons are Blizzard-rendered
+    -- and can't be zoomed, so the preview must not suggest otherwise.
+    if auraType == "db" then
+        local _z = s2.debuffIconZoom or 0.08
+        icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
+    elseif auraType == "def" then
+        local _z = s2.defIconZoom or 0.08
+        icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
+    end
     if icon._cooldown then
         local showSwipe, showDurText, dtColor, dtSize, dtOX, dtOY
         if auraType == "pa" then
@@ -10596,6 +10609,8 @@ local function PvAuraTick()
                 if f and f._pvDebuffs and f._pvDebuffs[1] and f._health then
                     local icon = f._pvDebuffs[1]
                     icon._tex:SetTexture(5927657)
+                    local _z = s2.debuffIconZoom or 0.08
+                    icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
                     icon:SetSize(s2.debuffSize or 18, s2.debuffSize or 18)
                     if icon._cooldown then
                         icon._cooldown:SetCooldown(now, dur)
@@ -11031,6 +11046,8 @@ ns.RefreshPvAuraVisuals = function()
     local _reanchor = ns._PvAuraReanchorFrame
     local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
+    local dbZ = s2.debuffIconZoom or 0.08
+    local defZ = s2.defIconZoom or 0.08
     local dbBdrSz = s2.debuffBorderSize or 1
     local dbBdrC = s2.debuffBorderColor or { r = 0, g = 0, b = 0 }
     local dbShowSwipe = s2.debuffShowSwipe ~= false
@@ -11057,6 +11074,7 @@ ns.RefreshPvAuraVisuals = function()
             for _, ic in ipairs(f._pvDebuffs) do
                 if ic:IsShown() then
                     ic:SetSize(s2.debuffSize or 18, s2.debuffSize or 18)
+                    ic._tex:SetTexCoord(dbZ, 1 - dbZ, dbZ, 1 - dbZ)
                     if ic._borderFrame and _PP then
                         if dbBdrSz > 0 then
                             _PP.UpdateBorder(ic._borderFrame, dbBdrSz, dbBdrC.r, dbBdrC.g, dbBdrC.b, 1)
@@ -11092,6 +11110,7 @@ ns.RefreshPvAuraVisuals = function()
             for _, ic in ipairs(f._pvDefs) do
                 if ic:IsShown() then
                     ic:SetSize(s2.defSize or 22, s2.defSize or 22)
+                    ic._tex:SetTexCoord(defZ, 1 - defZ, defZ, 1 - defZ)
                     if ic._borderFrame and _PP then
                         if defBdrSz > 0 then
                             _PP.UpdateBorder(ic._borderFrame, defBdrSz, defBdrC.r, defBdrC.g, defBdrC.b, 1)
@@ -12507,7 +12526,8 @@ local function ApplyPreviewData(f, index)
             local dbSz = s.debuffSize or 18
             ddi:SetSize(dbSz, dbSz)
             ddi._tex:SetTexture(ns._PV_DISPEL_DB_ICONS[dispelType])
-            ddi._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local _z = s.debuffIconZoom or 0.08
+            ddi._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
 
             -- Position using debuff settings
             ddi:ClearAllPoints()
