@@ -1811,37 +1811,53 @@ do
         hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
     end
 
-    -- Live peek: pressing the modifier while already hovering reveals the tip
-    -- (re-run the hovered frame's OnEnter); releasing it hides it again. The
-    -- hover-then-hold flow already works via the SetDefaultAnchor hook above.
+    -- Live peek: pressing the modifier while already hovering reveals the tip;
+    -- releasing it hides it again. (Hover-then-hold already works via the
+    -- SetDefaultAnchor hook above.)
     local function KeyMatchesModifier(key, mod)
         return (mod == "shift"   and (key == "LSHIFT" or key == "RSHIFT"))
             or (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))
             or (mod == "alt"     and (key == "LALT"   or key == "RALT"))
     end
-    -- The topmost mouse-focus frame is often an overlay/highlight without an
-    -- OnEnter (the tip lives on a button/nameplate below or a parent), so scan
-    -- every frame under the cursor and walk up parents for the first handler.
+    -- Reveal the tooltip for whatever the cursor is over. First re-run the
+    -- hovered frame's OnEnter (buttons, icons, unit frames build their own
+    -- tip) -- the topmost mouse-focus frame is often an overlay without one,
+    -- so scan every frame under the cursor and walk up parents. Nameplates'
+    -- clickable frame has an OnEnter that builds nothing (its tip comes from
+    -- the engine's mouseover unit on a real hover), so fall back to driving
+    -- the unit tooltip directly when one is up.
     local function FireHoveredOnEnter()
         local foci = (GetMouseFoci and GetMouseFoci()) or (GetMouseFocus and { GetMouseFocus() })
-        if not foci then return end
-        for _, focus in ipairs(foci) do
-            local frame = focus
-            while frame and frame ~= WorldFrame and frame ~= UIParent do
-                if frame.GetScript then
-                    local onEnter = frame:GetScript("OnEnter")
-                    if onEnter then
-                        pcall(onEnter, frame)
-                        return
+        local anchorFrame = foci and foci[1]
+        if foci then
+            for _, focus in ipairs(foci) do
+                local frame = focus
+                while frame and frame ~= WorldFrame and frame ~= UIParent do
+                    if frame.GetScript then
+                        local onEnter = frame:GetScript("OnEnter")
+                        if onEnter then
+                            pcall(onEnter, frame)
+                            if GameTooltip:IsShown() then return end
+                            anchorFrame = frame
+                            break
+                        end
                     end
+                    frame = frame.GetParent and frame:GetParent()
                 end
-                frame = frame.GetParent and frame:GetParent()
             end
+        end
+        if not GameTooltip:IsShown() and UnitExists("mouseover") then
+            GameTooltip_SetDefaultAnchor(GameTooltip, anchorFrame or UIParent)
+            GameTooltip:SetUnit("mouseover")
+            if EllesmereUI._repointTooltipAtCursor then
+                EllesmereUI._repointTooltipAtCursor(GameTooltip)
+            end
+            GameTooltip:Show()
         end
     end
     local modWatcher = CreateFrame("Frame")
     modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
-    modWatcher:SetScript("OnEvent", function(_, key, down)
+    modWatcher:SetScript("OnEvent", function(_, _event, key, down)
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
         if mode == "always" then return end
