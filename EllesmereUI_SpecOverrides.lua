@@ -4603,7 +4603,7 @@ RefreshCardsPopup = function()
                         RequestGoldWalk()
                         RefreshCardsPopup()
                         local ap = EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
-                        if ap == LIST_PAGE or ap == "Conditional Overrides" then
+                        if ap == LIST_PAGE or ap == L("Conditional Overrides") then
                             EllesmereUI:RefreshPage(true)
                         end
                     end,
@@ -5419,7 +5419,7 @@ function EllesmereUI.SpecOverrides_BuildListPage(parent, startY)
     end
 
     if (not store or #store == 0) and not layoutGroups and not bmGroups then
-        local _, h = W:SectionHeader(parent, "Spec Overrides", y);  y = y - h
+        local _, h = W:SectionHeader(parent, L("Spec Overrides"), y);  y = y - h
         local CONTENT_PAD = EllesmereUI.CONTENT_PAD or 40
         local hint = CreateFrame("Frame", nil, parent)
         hint:SetSize(parent:GetWidth() - CONTENT_PAD * 2, 80)
@@ -5535,7 +5535,7 @@ function EllesmereUI.Conditions_BuildListPage(parent, startY)
     end
 
     if (not store or #store == 0) and not layoutGroups and not bmGroups and #groups == 0 then
-        local _, h = W:SectionHeader(parent, "Conditional Overrides", y);  y = y - h
+        local _, h = W:SectionHeader(parent, L("Conditional Overrides"), y);  y = y - h
         local CONTENT_PAD = EllesmereUI.CONTENT_PAD or 40
         local hint = CreateFrame("Frame", nil, parent)
         hint:SetSize(parent:GetWidth() - CONTENT_PAD * 2, 80)
@@ -5544,7 +5544,7 @@ function EllesmereUI.Conditions_BuildListPage(parent, startY)
         fs:SetPoint("TOPLEFT", hint, "TOPLEFT", 20, -10)
         fs:SetWidth(hint:GetWidth() - 40)
         fs:SetJustifyH("LEFT")
-        fs:SetText(L("No conditional overrides yet. Click the Conditional Overrides button next to the module search bar and create a conditional group (Dungeon, Raid, Keybind...). Spec overrides always take precedence over conditionals."))
+        fs:SetText L("No conditional overrides yet. Click the Conditional Overrides button next to the module search bar and create a conditional group (Dungeon, Raid, Keybind...). Spec overrides always take precedence over conditionals.")
         y = y - 90
         return -y + 40
     end

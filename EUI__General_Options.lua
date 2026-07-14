@@ -244,7 +244,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     if not patches or #patches == 0 then
         local none = MakeFont(parent, 13, nil, 1, 1, 1, 0.5)
         PP.Point(none, "TOPLEFT", parent, "TOPLEFT", PAD, y - 20)
-        none:SetText("No patch notes yet.")
+        none:SetText (EllesmereUI.L("No patch notes yet."))
         return math.abs(y) + 60
     end
 
@@ -253,7 +253,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local hint = MakeFont(parent, 14, nil, 1, 1, 1, 0.5)
     PP.Point(hint, "TOP", parent, "TOP", 0, y)
     hint:SetJustifyH("CENTER")
-    hint:SetText("Click any new feature to go directly to the setting")
+    hint:SetText (EllesmereUI.L("Click any new feature to go directly to the setting"))
 
     -- Top-left: "New Patch Reminder Dot" opt-out for the pulsing sidebar dot
     -- that appears when the account's version increases (see the Patch Notes
@@ -7121,7 +7121,7 @@ initFrame:SetScript("OnEvent", function(self)
     if not IS_STANDALONE then
         EllesmereUI:RegisterModule(PATCHNOTES_KEY, {
             title       = "Patch Notes",
-            description = "What's new in EllesmereUI.",
+            description = EllesmereUI.L("What's new in EllesmereUI."),
             pages       = { PAGE_WHATSNEW },
             buildPage   = function(pageName, parent, yOffset)
                 return EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
