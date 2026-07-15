@@ -167,6 +167,15 @@ qolFrame:SetScript("OnEvent", function(self)
         local function IsEnabled()
             return EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true
         end
+        -- A merchant being open turns UseContainerItem into a SELL (Blizzard
+        -- routes "use item" to the vendor), so auto-open must pause while any
+        -- merchant frame is shown -- otherwise freshly-bought containers get
+        -- opened at the vendor, or a non-openable item throws "the merchant
+        -- doesn't want that item". Re-checked before every open; the pass
+        -- re-runs on MERCHANT_CLOSED.
+        local function MerchantOpen()
+            return (MerchantFrame and MerchantFrame:IsShown()) and true or false
+        end
         -- "Exclude Warbound Containers": true only when the option is on AND
         -- the slot is confirmed warband-bank-eligible. Guarded like the bags
         -- module (C_Bank / ItemLocation / DoesItemExist can all be absent or
@@ -174,7 +183,13 @@ qolFrame:SetScript("OnEvent", function(self)
         -- returns false so the container opens normally rather than being
         -- silently skipped.
         local function IsWarboundExcluded(bag, slot)
-            if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainersExcludeWarbound) then return false end
+            -- Default ON: the options UI shows this checked when unset
+            -- (autoOpenContainersExcludeWarbound ~= false), so the runtime must
+            -- treat nil the same way. Only an explicit false disables it -- the
+            -- old `not value` test made a never-toggled setting (nil) skip the
+            -- exclusion, so warbound containers auto-opened despite the toggle
+            -- appearing enabled.
+            if not EllesmereUIDB or EllesmereUIDB.autoOpenContainersExcludeWarbound == false then return false end
             if not (C_Bank and C_Bank.IsItemAllowedInBankType and ItemLocation
                 and C_Item and C_Item.DoesItemExist) then return false end
             local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
@@ -220,11 +235,11 @@ qolFrame:SetScript("OnEvent", function(self)
                         _cacheBuilt = true
                         self:Hide()
                         -- Open any containers found during scan
-                        if #_pendingOpens > 0 and not InCombatLockdown() then
+                        if #_pendingOpens > 0 and not InCombatLockdown() and not MerchantOpen() then
                             local function OpenNext(idx)
                                 if idx > #_pendingOpens then wipe(_pendingOpens); return end
                                 if not IsEnabled() then wipe(_pendingOpens); return end
-                                if InCombatLockdown() then wipe(_pendingOpens); return end
+                                if InCombatLockdown() or MerchantOpen() then wipe(_pendingOpens); return end
                                 local item = _pendingOpens[idx]
                                 local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
                                 if info and info.itemID then
@@ -275,6 +290,11 @@ qolFrame:SetScript("OnEvent", function(self)
         EllesmereUI._applyAutoOpenContainers = function()
             if IsEnabled() then
                 containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+                -- Re-run once the vendor closes: BAG_UPDATE_DELAYED from a
+                -- purchase fires while the merchant is open (when opens are
+                -- suppressed), so without this the just-bought containers would
+                -- never open after leaving the vendor.
+                containerFrame:RegisterEvent("MERCHANT_CLOSED")
                 if not _cacheBuilt then
                     _scanBag = BACKPACK_CONTAINER
                     _scanSlot = 1
@@ -283,6 +303,7 @@ qolFrame:SetScript("OnEvent", function(self)
                 end
             else
                 containerFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
+                containerFrame:UnregisterEvent("MERCHANT_CLOSED")
                 scanFrame:Hide()
             end
         end
@@ -291,10 +312,11 @@ qolFrame:SetScript("OnEvent", function(self)
         C_Timer.After(2, function()
             if IsEnabled() then EllesmereUI._applyAutoOpenContainers() end
         end)
-        containerFrame:SetScript("OnEvent", function()
+        local function ScanAndOpen()
             if not _cacheBuilt then return end
             if not IsEnabled() then return end
             if InCombatLockdown() then return end
+            if MerchantOpen() then return end
             local toOpen = {}
             for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                 for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -315,6 +337,7 @@ qolFrame:SetScript("OnEvent", function(self)
                 if idx > #toOpen then return end
                 if not IsEnabled() then return end
                 if InCombatLockdown() then return end
+                if MerchantOpen() then return end
                 local item = toOpen[idx]
                 local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
                 if info2 and info2.itemID then
@@ -339,6 +362,16 @@ qolFrame:SetScript("OnEvent", function(self)
                 C_Timer.After(0.5, function() OpenNext(idx + 1) end)
             end
             C_Timer.After(0.5, function() OpenNext(1) end)
+        end
+
+        containerFrame:SetScript("OnEvent", function(_, event)
+            -- MERCHANT_CLOSED can fire before the frame finishes hiding, so give
+            -- it a moment before ScanAndOpen re-checks MerchantOpen().
+            if event == "MERCHANT_CLOSED" then
+                C_Timer.After(0.3, ScanAndOpen)
+            else
+                ScanAndOpen()
+            end
         end)
     end
 
