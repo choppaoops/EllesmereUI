@@ -5544,7 +5544,7 @@ function EllesmereUI.Conditions_BuildListPage(parent, startY)
         fs:SetPoint("TOPLEFT", hint, "TOPLEFT", 20, -10)
         fs:SetWidth(hint:GetWidth() - 40)
         fs:SetJustifyH("LEFT")
-        fs:SetText (EllesmereUI.L("No conditional overrides yet. Click the Conditional Overrides button next to the module search bar and create a conditional group (Dungeon, Raid, Keybind...). Spec overrides always take precedence over conditionals."))
+        fs:SetText(L("No conditional overrides yet. Click the Conditional Overrides button next to the module search bar and create a conditional group (Dungeon, Raid, Keybind...). Spec overrides always take precedence over conditionals."))
         y = y - 90
         return -y + 40
     end

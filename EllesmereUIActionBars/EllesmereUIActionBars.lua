@@ -695,6 +695,32 @@ local function ButtonHasAction(btn, prefix)
 end
 ns.ButtonHasAction = ButtonHasAction
 
+-- Force-paint a Blizzard-native button's cooldown swipe/text from its current
+-- action state, instead of waiting on the next ACTIONBAR_UPDATE_COOLDOWN
+-- broadcast. We kill the stock cooldown broadcasters at load, so buttons we
+-- don't rebuild (OverrideActionBarButton1-6, ExtraActionButton1) otherwise show
+-- no swipe/number for an ability already on cooldown the instant they appear,
+-- until mouseover or combat forces a refresh. Reads the slot via
+-- GetAttribute("action"), never btn.action (protected -- reading it during
+-- combat taints). Clears when no active duration is resolvable so a stale swipe
+-- from a prior state is never left behind.
+local function ForceCooldownPaint(btn)
+    if not btn then return end
+    local cd = btn.cooldown
+    local action = btn:GetAttribute("action")
+    if cd and action and HasAction(action) and C_ActionBar and C_ActionBar.GetActionCooldown then
+        local cdInfo = C_ActionBar.GetActionCooldown(action)
+        local durObj = cdInfo and cdInfo.isActive and C_ActionBar.GetActionCooldownDuration
+            and C_ActionBar.GetActionCooldownDuration(action)
+        if durObj then
+            cd:SetCooldownFromDurationObject(durObj)
+        else
+            cd:Clear()
+        end
+    end
+end
+ns.ForceCooldownPaint = ForceCooldownPaint
+
 -- Stock bar frames to disable. Each entry carries flags for how to handle it:
 --   retainEvents  = true  -> do NOT unregister events (needed for override state)
 local STOCK_BAR_DISPOSAL = {
@@ -734,6 +760,10 @@ do
     local _abefEvents = {
         "ACTIONBAR_UPDATE_COOLDOWN", "ACTIONBAR_UPDATE_STATE",
         "ACTIONBAR_UPDATE_USABLE", "ACTIONBAR_SLOT_CHANGED",
+        -- Spell-typed extra-action buttons (some delve abilities) carry no
+        -- action slot, so their cooldown fires SPELL_UPDATE_COOLDOWN, not
+        -- ACTIONBAR_UPDATE_COOLDOWN. Needed so the broadcaster repaints them.
+        "SPELL_UPDATE_COOLDOWN",
         "UPDATE_SHAPESHIFT_FORM", "PLAYER_ENTERING_WORLD",
     }
     local _aaefEvents = {
@@ -741,58 +771,70 @@ do
         "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED",
         "UNIT_SPELLCAST_INTERRUPTED",
     }
-    local _broadcasterActive = false
-    local vehFrame = CreateFrame("Frame")
-    vehFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
-    vehFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
-    vehFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
-    vehFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
-    vehFrame:SetScript("OnEvent", function(_, event, unit)
-        if event == "UNIT_ENTERED_VEHICLE" or event == "UPDATE_VEHICLE_ACTIONBAR"
-            or event == "UPDATE_OVERRIDE_ACTIONBAR" then
-            if unit and unit ~= "player" then return end
-            if not _broadcasterActive then
-                _broadcasterActive = true
-                if ActionBarButtonEventsFrame then
-                    for _, ev in ipairs(_abefEvents) do
-                        ActionBarButtonEventsFrame:RegisterEvent(ev)
-                    end
-                end
-                if ActionBarActionEventsFrame then
-                    for _, ev in ipairs(_aaefEvents) do
-                        ActionBarActionEventsFrame:RegisterUnitEvent(ev, "player")
-                    end
+    -- The native broadcaster is killed at load; re-enable it only while
+    -- something that needs it is active. Two independent needs, ref-counted so
+    -- one turning off never strands the other: the vehicle/override bar
+    -- (OverrideActionBarButton1-6) and the extra action button
+    -- (ExtraActionButton1 -- its spell-typed delve abilities have no action
+    -- slot, so our own dispatch can't paint their cooldown; only Blizzard's
+    -- native update, driven by this broadcaster, can).
+    local _vehNeed, _extraNeed, _broadcasterActive = false, false, false
+    local function ApplyBroadcaster()
+        local want = _vehNeed or _extraNeed
+        if want == _broadcasterActive then return end
+        _broadcasterActive = want
+        if want then
+            if ActionBarButtonEventsFrame then
+                for _, ev in ipairs(_abefEvents) do
+                    ActionBarButtonEventsFrame:RegisterEvent(ev)
                 end
             end
-            -- Refresh keybind text + full update on OverrideActionBar buttons.
-            -- The broadcaster kill at load time prevented the initial setup.
+            if ActionBarActionEventsFrame then
+                for _, ev in ipairs(_aaefEvents) do
+                    ActionBarActionEventsFrame:RegisterUnitEvent(ev, "player")
+                end
+            end
+        else
+            if ActionBarButtonEventsFrame then ActionBarButtonEventsFrame:UnregisterAllEvents() end
+            if ActionBarActionEventsFrame then ActionBarActionEventsFrame:UnregisterAllEvents() end
+        end
+    end
+    -- Recompute both needs from ground truth -- the actual visibility of the
+    -- buttons that depend on the broadcaster -- and apply. We poll visibility on
+    -- a broad set of events (below) instead of tracking enter/exit precisely,
+    -- because the triggering events proved unreliable: the extra action button's
+    -- own OnShow doesn't fire on delve entry, and the vehicle enter events don't
+    -- reliably fire/keep state either. Visibility is the ground truth.
+    local function RefreshBroadcasterNeeds()
+        _vehNeed = (OverrideActionBarButton1 and OverrideActionBarButton1:IsShown()) and true or false
+        _extraNeed = (ExtraActionButton1 and ExtraActionButton1:IsShown()) and true or false
+        ApplyBroadcaster()
+    end
+    -- Exposed for the extra action button's Show-hook refresh in
+    -- SetupBlizzardMovableFrame (a reliable trigger for delve entry).
+    ns.RefreshBroadcaster = RefreshBroadcasterNeeds
+    local barFrame = CreateFrame("Frame")
+    barFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
+    barFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
+    barFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
+    barFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
+    barFrame:RegisterEvent("UPDATE_EXTRA_ACTIONBAR")
+    barFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    barFrame:SetScript("OnEvent", function(_, event, unit)
+        -- Deferred so IsShown reflects Blizzard's post-event state.
+        C_Timer.After(0, RefreshBroadcasterNeeds)
+        -- On vehicle/override entry, force-paint the OverrideActionBar buttons'
+        -- cooldowns immediately -- the broadcaster only catches the NEXT change,
+        -- so an ability already on cooldown when the bar appears needs an
+        -- initial paint (see ForceCooldownPaint).
+        if (event == "UNIT_ENTERED_VEHICLE" or event == "UPDATE_VEHICLE_ACTIONBAR"
+            or event == "UPDATE_OVERRIDE_ACTIONBAR") and not (unit and unit ~= "player") then
             C_Timer.After(0, function()
                 for i = 1, 6 do
                     local btn = _G["OverrideActionBarButton" .. i]
                     if btn then
                         if btn.UpdateAction then btn:UpdateAction() end
-                        -- Force-paint the cooldown swipe/text right now instead of
-                        -- waiting for a future ACTIONBAR_UPDATE_COOLDOWN broadcast --
-                        -- re-registering the broadcaster above only catches the NEXT
-                        -- cooldown state change, so a vehicle ability already on
-                        -- cooldown the moment we enter (or re-enter) the vehicle never
-                        -- gets an initial paint and shows no swipe/number until
-                        -- something else (mouseover, combat) forces a real update.
-                        -- Mirrors the ExtraActionButton1 cooldown dispatch above:
-                        -- GetAttribute("action"), never btn.action (protected/secret
-                        -- attribute -- reading it directly during combat taints).
-                        local cd = btn.cooldown
-                        local action = btn:GetAttribute("action")
-                        if cd and action and HasAction(action) and C_ActionBar and C_ActionBar.GetActionCooldown then
-                            local cdInfo = C_ActionBar.GetActionCooldown(action)
-                            if cdInfo and cdInfo.isActive then
-                                local durObj = C_ActionBar.GetActionCooldownDuration
-                                    and C_ActionBar.GetActionCooldownDuration(action)
-                                if durObj then cd:SetCooldownFromDurationObject(durObj) end
-                            else
-                                cd:Clear()
-                            end
-                        end
+                        ForceCooldownPaint(btn)
                         local hk = btn.HotKey
                         if hk then
                             local key1 = GetBindingKey("ACTIONBUTTON" .. i)
@@ -804,13 +846,6 @@ do
                     end
                 end
             end)
-        elseif event == "UNIT_EXITED_VEHICLE" then
-            if unit and unit ~= "player" then return end
-            if _broadcasterActive then
-                _broadcasterActive = false
-                if ActionBarButtonEventsFrame then ActionBarButtonEventsFrame:UnregisterAllEvents() end
-                if ActionBarActionEventsFrame then ActionBarActionEventsFrame:UnregisterAllEvents() end
-            end
         end
     end)
 end
@@ -2816,19 +2851,7 @@ do
                             EAB_VTABLE.ForceButtonRefresh(eab1, action)
                         end
                     else
-                        local action = eab1:GetAttribute("action")
-                        if action and HasAction(action) then
-                            local cd = eab1.cooldown
-                            if cd then
-                                local cdInfo = C_ActionBar.GetActionCooldown(action)
-                                if cdInfo and cdInfo.isActive then
-                                    local dur = C_ActionBar.GetActionCooldownDuration(action)
-                                    if dur then cd:SetCooldownFromDurationObject(dur) end
-                                else
-                                    cd:Clear()
-                                end
-                            end
-                        end
+                        ForceCooldownPaint(eab1)
                     end
                 end
             end
@@ -6090,8 +6113,8 @@ function EAB:ApplyExtraBarVisibility()
             -- state is "hide" during pet battle, "show" otherwise
             local shouldHide = (state == "hide")
             for _, info in ipairs(EXTRA_BARS) do
-                if info.noManagedVisibility or info.blizzOwnedVisibility then
-                    -- skip: Blizzard handles pet battle visibility for these
+                if info.noManagedVisibility then
+                    -- skip
                 else
                 local key = info.key
                 local s = EAB.db and EAB.db.profile.bars[key]
@@ -10984,12 +11007,48 @@ local function SetupBlizzardMovableFrame(barKey)
         ExtraAbilityContainer:SetScript("OnShow", nil)
         ExtraAbilityContainer:SetScript("OnHide", nil)
 
-        -- Hook AddFrame so newly added ability buttons stay clickable.
+        -- Refresh ExtraActionButton1's keybind text and cooldown swipe. The
+        -- broadcaster kill at load prevents Blizzard's UPDATE_BINDINGS and
+        -- cooldown updates from reaching this button, so we drive both here.
+        -- UpdateAction runs first; the keybind is set after it so Blizzard's own
+        -- UpdateHotkeys (which hides the key when GetBindingKey is momentarily
+        -- nil) can't clobber our text. Unlike the cooldown -- which recovers via
+        -- the ACTIONBAR_UPDATE_COOLDOWN dispatcher -- the keybind has no such
+        -- fallback, so every path that can reveal the button refreshes it.
+        local function RefreshExtraActionButton()
+            local eab1 = ExtraActionButton1
+            if not eab1 then return end
+            if eab1.UpdateAction then eab1:UpdateAction() end
+            local hk = eab1.HotKey
+            if hk then
+                local key1 = GetBindingKey("EXTRAACTIONBUTTON1")
+                if key1 then
+                    hk:SetText(FormatHotkeyText(key1))
+                    hk:Show()
+                end
+            end
+            ForceCooldownPaint(eab1)
+            -- Re-evaluate the broadcaster need now: this container Show/AddFrame
+            -- refresh is a reliable delve-entry signal (the button's own OnShow
+            -- doesn't fire then), and RefreshBroadcaster reads the button's
+            -- actual visibility to decide.
+            if ns.RefreshBroadcaster then
+                ns.RefreshBroadcaster()
+            end
+        end
+
+        -- Hook AddFrame so newly added ability buttons stay clickable, and
+        -- refresh the extra action button. When the container is already shown
+        -- (e.g. a zone ability is active) and the extra action button then
+        -- becomes active, that fires AddFrame but not the container's Show hook,
+        -- so this is the only refresh signal for that path. Deferred one frame so
+        -- Blizzard has finished assigning the button's action before we read it.
         if ExtraAbilityContainer.AddFrame then
             hooksecurefunc(ExtraAbilityContainer, "AddFrame", function(_, frame)
                 if frame and frame.EnableMouse and not InCombatLockdown() then
                     frame:EnableMouse(true)
                 end
+                C_Timer_After(0, RefreshExtraActionButton)
             end)
         end
 
@@ -11032,22 +11091,17 @@ local function SetupBlizzardMovableFrame(barKey)
             if ExtraAbilityContainer:GetParent() ~= holder then
                 RepositionExtraContainer()
             end
-            -- Refresh keybind text on ExtraActionButton1. The broadcaster
-            -- kill at load time prevents Blizzard's UPDATE_BINDINGS from
-            -- reaching the button, so we update it here on show.
-            local eab1 = ExtraActionButton1
-            if eab1 then
-                local hk = eab1.HotKey
-                if hk then
-                    local key1 = GetBindingKey("EXTRAACTIONBUTTON1")
-                    if key1 then
-                        hk:SetText(FormatHotkeyText(key1))
-                        hk:Show()
-                    end
-                end
-                if eab1.UpdateAction then eab1:UpdateAction() end
-            end
+            RefreshExtraActionButton()
         end)
+
+        -- Quick-reload catch-up: if the button is already showing, its Show (and
+        -- AddFrame) fired before this deferred setup registered the hooks above,
+        -- so we missed them. Refresh now so the keybind isn't left blank until
+        -- the next show -- the cooldown recovers on its own via the dispatcher,
+        -- the keybind has no such fallback.
+        if ExtraActionButton1 and ExtraActionButton1:IsShown() then
+            RefreshExtraActionButton()
+        end
     end
 
     -- Encounter Bar: reparent into holder, mark as user-placed so Blizzard's

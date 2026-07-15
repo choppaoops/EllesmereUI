@@ -1787,18 +1787,23 @@ local function DecorateFrame(frame, barData)
                     -- suppressed. Both fields are clean (maxCharges int, isActive bool;
                     -- the secret currentCharges is never read). Override ID resolved for
                     -- transform spells, mirroring the re-arm paths below.
+                    local effID2 = sid2
+                    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                        local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                        if ovr and ovr > 0 and ovr ~= sid2 then effID2 = ovr end
+                    end
                     local chargeRecharging = false
                     if C_Spell.GetSpellCharges then
-                        local effIDc = sid2
-                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-                            local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
-                            if ovr and ovr > 0 and ovr ~= sid2 then effIDc = ovr end
-                        end
-                        local ci = C_Spell.GetSpellCharges(effIDc) or C_Spell.GetSpellCharges(sid2)
+                        local ci = C_Spell.GetSpellCharges(effID2) or C_Spell.GetSpellCharges(sid2)
                         chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
                     end
                     if not chargeRecharging then
-                        local cdInfo = C_Spell.GetSpellCooldown(sid2)
+                        -- The GCD read must use the override too: a transform's real
+                        -- CD ticks on the override ID (e.g. Rushing Wind Kick over
+                        -- Rising Sun Kick), and the base-ID query reads isOnGCD=true
+                        -- through that whole CD, leaving the swipe suppressed for
+                        -- its full duration.
+                        local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
                         if cdInfo and cdInfo.isOnGCD then
                             cd:SetSwipeColor(0, 0, 0, 0)
                             _gcdSuppressed = true
