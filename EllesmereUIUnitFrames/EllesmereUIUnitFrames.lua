@@ -12158,12 +12158,27 @@ function InitializeFrames()
     -- this is a cheap no-op unless the user enabled a boss border.
     -- Defined on ns (not a local) to avoid the Lua 200-local cap.
     ns.UpdateBossTargetBorders = function()
+        local s = db.profile.boss
         for i = 1, 5 do
-            local f = frames["boss" .. i]
-            if f and f.unifiedBorder then
-                local isT = UnitIsUnit("boss" .. i, "target")
-                f._isTarget = (isT and not issecretvalue(isT)) and true or false
-                ns.ApplyBossBorderState(f)
+            local bUnit = "boss" .. i
+            local f = frames[bUnit]
+            if f then
+                if f.unifiedBorder then
+                    local isT = UnitIsUnit(bUnit, "target")
+                    f._isTarget = (isT and not issecretvalue(isT)) and true or false
+                    ns.ApplyBossBorderState(f)
+                end
+                if s then
+                    if f.LeftText and s.leftTextClassColor ~= nil then
+                        ApplyClassColor(f.LeftText, bUnit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+                    end
+                    if f.RightText and s.rightTextClassColor ~= nil then
+                        ApplyClassColor(f.RightText, bUnit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+                    end
+                    if f.CenterText and s.centerTextClassColor ~= nil then
+                        ApplyClassColor(f.CenterText, bUnit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
+                    end
+                end
             end
         end
     end
