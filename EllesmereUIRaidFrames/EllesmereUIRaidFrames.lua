@@ -6544,6 +6544,11 @@ FB.EnsureBuilt = function()
             FB.Update(self)
             FB.ApplyRange(self)
             FB.UpdateRangeTicker()
+            if ns.RFC_OnUnitAssigned then
+                local d = GetFFD(self)
+                local unit = FB.UnitOf(self)
+                if d and unit then ns.RFC_OnUnitAssigned(self, d, unit) end
+            end
         end)
         b:HookScript("OnHide", function(self)
             FB.visCount = math.max(0, (FB.visCount or 0) - 1)
@@ -6567,6 +6572,11 @@ FB.EnsureBuilt = function()
             if name == "unit" and self:IsVisible() then
                 FB.Update(self)
                 FB.ApplyRange(self)
+                if ns.RFC_OnUnitAssigned then
+                    local d = GetFFD(self)
+                    local unit = FB.UnitOf(self)
+                    if d and unit then ns.RFC_OnUnitAssigned(self, d, unit) end
+                end
             end
         end)
 
@@ -6592,6 +6602,11 @@ FB.EnsureBuilt = function()
         FB.trackers[i] = t
 
         FB.buttons[i] = b
+
+        if ns.RFC_SetupButton then
+            local d = GetFFD(b)
+            ns.RFC_SetupButton(b, b._health, d)
+        end
     end
 
     -- Slot controller: collapses friendly bosses into the FIRST slots. Button
