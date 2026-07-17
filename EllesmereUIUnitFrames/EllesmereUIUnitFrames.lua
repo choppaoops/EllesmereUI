@@ -1764,9 +1764,9 @@ end
 ns.NICK_ADDON = addonName:find("Standalone") and addonName or "EllesmereUI"
 
 -- Resolve a unit's display name, consulting nickname providers in order: NSRT
--- (NSAPI) -> Timeline Reminders (TimelineReminders) -> Liquid (LiquidAPI), then
--- the raw unit name. Each provider is gated entirely by its OWN addon (no EUI-side
--- toggle) and pcall-wrapped so a misbehaving external API can never break names.
+-- (NSAPI) -> MethodInternal (EasyNicknameAPI) -> Timeline Reminders
+-- (TimelineReminders) -> Liquid (LiquidAPI), then the raw unit name. Each provider
+-- is pcall-wrapped so a misbehaving external API can never break names.
 --
 -- SECRET-SAFE for target/focus/etc.: an enemy unit's UnitName is a secret value
 -- in protected content, and any Lua op on it (==, .., format) throws. Nicknames
@@ -1791,6 +1791,13 @@ function ns.ResolveUnitNickname(unit)
     local display
     if not nameSecret and NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
+            display = dn
+        end
+    end
+    if not display and not nameSecret and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnit then
+        local ok, dn = pcall(EasyNicknameAPI.GetNicknameForUnit, unit)
         if ok and type(dn) == "string"
            and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
             display = dn
