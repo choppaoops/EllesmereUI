@@ -8150,10 +8150,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
 
-    -- Resolve the interrupter's name + class from the GUID, exactly as PR #398
-    -- does. Class-color is applied via an embedded hex code when the class
-    -- resolves; if it doesn't (e.g. a secret GUID), the `if interrupterClass`
-    -- check simply skips coloring and the name shows uncolored.
+    -- Resolve the interrupter's name + class from the GUID.
     local interrupterName
     local interrupterClass
     if interrupterGUID then
@@ -8177,11 +8174,11 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     -- FontString; the cast-target / timer slots are cleared during the flash.
     local castW = self.cast:GetWidth()
     if castW and castW > 0 then
-        -- Interrupter name uses near-full bar width to fit "Interrupted (Name)";
-        -- the plain "Interrupted" flash falls back to the configured name width %.
         local cnWPct = (p and p.castNameWidthPct) or defaults.castNameWidthPct
         self.castName:SetWidth(interrupterName and math.max(castW - 8, 20) or castW * cnWPct / 100)
     end
+
+    local interruptedText = (EllesmereUI and EllesmereUI.L and EllesmereUI.L("Interrupted")) or "Interrupted"
     if interrupterName then
         local sourceText = interrupterName
         if useClassColor and interrupterClass and C_ClassColor then
@@ -8194,10 +8191,11 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
                 if hex then sourceText = "|c" .. hex .. interrupterName .. "|r" end
             end
         end
-        self.castName:SetText("Interrupted (" .. sourceText .. ")")
+        self.castName:SetText(interruptedText .. " (" .. sourceText .. ")")
     else
-        self.castName:SetText("Interrupted")
+        self.castName:SetText(interruptedText)
     end
+
     self.castTarget:SetText("")
     self.castTarget:Hide()
     self.castTimer:Hide()
