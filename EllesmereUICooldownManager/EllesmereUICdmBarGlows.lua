@@ -270,7 +270,7 @@ local function UpdateOverlayVisuals()
                     if shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none" then
                         style = 2
                     end
-                    local cr, cg, cb = 1, 0.82, 0.1
+                    local cr, cg, cb
                     if entry.classColor then
                         local _, ct = UnitClass("player")
                         if ct then
