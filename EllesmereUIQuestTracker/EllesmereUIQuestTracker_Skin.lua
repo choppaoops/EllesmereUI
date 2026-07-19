@@ -999,9 +999,14 @@ local _tighteningAnchor = false
 local function TightenTopAnchor(tracker)
     if _tighteningAnchor then return end
     if not tracker or not tracker.GetPoint or not tracker.SetPoint then return end
-    if InCombatLockdown and InCombatLockdown() then return end
-    -- Do not interfere during Blizzard's collapse/expand slide animation,
-    -- or our SetPoint collides with ObjectiveTrackerSlidingMixin.
+    -- NOTE: previously guarded with InCombatLockdown(), which caused a
+    -- visible flicker -- every SetPoint call was skipped while in combat
+    -- (e.g. killing one mob while still fighting another), leaving the
+    -- tracker visibly at Blizzard's untightened -38 until combat ended.
+    -- ObjectiveTracker module frames are plain Frame objects (not a secure
+    -- template like ActionButton/UnitFrame), and SetPoint on a frame's own
+    -- position is not a protected call in that case -- verified safe via
+    -- in-combat multi-pull testing, no ADDON_ACTION_BLOCKED/taint errors.
     if tracker.IsSliding and tracker:IsSliding() then return end
 
     local point, relativeTo, relativePoint, xOfs, yOfs = tracker:GetPoint(1)
@@ -1223,6 +1228,16 @@ function EQT.InitSkin()
     evt:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     evt:RegisterEvent("TRACKED_RECIPE_UPDATE")
     evt:RegisterEvent("SUPER_TRACKING_CHANGED")
+    -- Killing a mob while still in combat with other targets fires the
+    -- native Update() (and our SetPoint hook) while InCombatLockdown() is
+    -- true. TightenTopAnchor's combat guard correctly skips SetPoint in that
+    -- case (see comment there), but nothing previously re-ran the correction
+    -- once combat ended -- the anchor stayed at Blizzard's untightened -38
+    -- until some unrelated later event happened to trigger another Update.
+    -- That's what showed up as the padding flickering on/off with each loot,
+    -- depending on whether that particular kill left combat active. Catching
+    -- up here, once, right when combat lockdown lifts, closes that gap.
+    evt:RegisterEvent("PLAYER_REGEN_ENABLED")
     -- Quest events just need a BG resize. Block skinning is handled by
     -- AddBlock/AddObjective/GetProgressBar/GetTimerBar hooks, so we no
     -- longer need to walk the entire tracker tree on every event.
@@ -1234,6 +1249,12 @@ function EQT.InitSkin()
         -- which already go through Blizzard's own native Update()).
         if event == "SUPER_TRACKING_CHANGED" and EQT.ForceTrackerRelayout then
             EQT.ForceTrackerRelayout()
+        end
+        if event == "PLAYER_REGEN_ENABLED" then
+            EachTracker(function(t)
+                if SharesWidgetPool(t) then return end
+                TightenTopAnchor(t)
+            end)
         end
     end)
     if not EQT._eventFrames then EQT._eventFrames = {} end
@@ -1276,4 +1297,3 @@ function EQT.InitSkin()
         end })
     end
 end
-
