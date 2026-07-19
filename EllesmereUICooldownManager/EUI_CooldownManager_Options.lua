@@ -6331,10 +6331,6 @@ initFrame:SetScript("OnEvent", function(self)
                           and ns.cdmBarIcons and ns.cdmBarIcons[barKeyE]
         if liveIcons then
             if not sd.assignedSpells then sd.assignedSpells = {} end
-            local seen = {}
-            for _, existing in ipairs(sd.assignedSpells) do
-                seen[existing] = true
-            end
             local removed = sd.removedSpells
             -- Never materialize a spell that's currently HIDDEN (in the ghost bar)
             -- onto a visible bar -- that recreates a both-state and the spell would
@@ -6378,7 +6374,14 @@ initFrame:SetScript("OnEvent", function(self)
             -- position instead of being appended at the very end (which piled
             -- talent-swap spells after the trinket/racial slots and never survived
             -- a /reload cleanly).
-            local insertAfterSid = nil
+            -- Variant-aware presence + POSITION cursor (mirrors the reseed pass in
+            -- EllesmereUICooldownManager.lua): the old exact-match seen set missed a
+            -- stored entry when the live icon resolved to a different variant form,
+            -- re-inserting a duplicate at Blizzard's position -- and the normalize
+            -- pass above then deduped keeping that copy, deleting the user's saved
+            -- slot (the Raptor Strike / Kill Command order swap, 8.4.9). The
+            -- by-value cursor lookup failed identically and dumped inserts at 1.
+            local insertPos = nil
             for _, icon in ipairs(liveIcons) do
                 -- Resolve the live icon's DISPLAYED spell the same way the picker
                 -- does (canonical = GetSpellID-first, with the active-frame cache),
@@ -6407,30 +6410,23 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if _sid and _sid ~= 0 then
                     if _sid > 0 then _sid = NormalizeToBase(_sid) end
-                    if seen[_sid] then
-                        -- Already has a slot (Blizzard spell OR a custom trinket/item
-                        -- marker): advance the cursor so the next NEW spell lands after
-                        -- it, matching the on-screen order across custom entries too.
-                        insertAfterSid = _sid
+                    -- FindVar handles negatives by exact scan internally; variant
+                    -- matching is a superset of exact for positives.
+                    local at = FindVar and FindVar(sd.assignedSpells, _sid)
+                    if at then
+                        -- Already has a slot (any variant form, or a custom trinket/
+                        -- item marker): advance the cursor so the next NEW spell
+                        -- lands after it, matching the on-screen order.
+                        insertPos = at
                     elseif _sid > 0
                        and not (removed and removed[_sid])
                        and not (ghostList and FindVar and FindVar(ghostList, _sid))
                        and not (claimedElsewhere and ns.ResolveVariantValue and ns.ResolveVariantValue(claimedElsewhere, _sid)) then
-                        local pos
-                        if insertAfterSid then
-                            for i = 1, #sd.assignedSpells do
-                                if sd.assignedSpells[i] == insertAfterSid then pos = i; break end
-                            end
-                        end
-                        if pos then
-                            table.insert(sd.assignedSpells, pos + 1, _sid)
-                        else
-                            -- No anchored predecessor yet: this new spell is the
-                            -- left-most live icon, so it belongs at the front.
-                            table.insert(sd.assignedSpells, 1, _sid)
-                        end
-                        seen[_sid] = true
-                        insertAfterSid = _sid
+                        -- No anchored predecessor yet: this new spell is the
+                        -- left-most live icon, so it belongs at the front.
+                        local pos = insertPos and (insertPos + 1) or 1
+                        table.insert(sd.assignedSpells, pos, _sid)
+                        insertPos = pos
                     end
                 end
             end
