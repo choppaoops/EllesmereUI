@@ -3258,6 +3258,18 @@ do
             bdFrame:SetBackdropBorderColor(r, g, b, a)
         end
     end
+
+    --- Hide whichever ApplyBorderStyle system is currently drawn on borderFrame
+    --- (the PP pixel border or the BackdropTemplate texture) WITHOUT hiding
+    --- borderFrame itself -- used when a different renderer (e.g. the dashed
+    --- ants border) takes over the same frame.
+    function EllesmereUI.HideBorderStyle(borderFrame)
+        if not borderFrame then return end
+        local PP = EllesmereUI.PP
+        if PP and PP.GetBorders and PP.GetBorders(borderFrame) then PP.HideBorder(borderFrame) end
+        local bdFrame = _bdBorderData[borderFrame]
+        if bdFrame then bdFrame:Hide() end
+    end
 end
 
 -------------------------------------------------------------------------------
