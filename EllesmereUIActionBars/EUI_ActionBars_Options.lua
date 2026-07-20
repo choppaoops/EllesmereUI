@@ -1186,6 +1186,7 @@ initFrame:SetScript("OnEvent", function(self)
         dst._savedBarAlpha = src._savedBarAlpha
         dst.combatHideEnabled = src.combatHideEnabled
         dst.combatShowEnabled = src.combatShowEnabled
+        dst.dragShow = src.dragShow
     end
 
 
@@ -1210,7 +1211,18 @@ initFrame:SetScript("OnEvent", function(self)
         local function _blizzDis() return EAB.db.profile.useBlizzardDataBars end
 
         -- Shared visibility row: left vis dropdown + right "Visibility Options" checkbox dropdown
-        local function BuildVisRow(barKey, leftLabel, disabledFn, disTip)
+        -- trackNeverFlip: data-bar sections hide their dependent rows while the
+        -- bar's visibility is Never, so a Never <-> not-Never flip must force a
+        -- full page rebuild. The baseline is captured at build time; a flip
+        -- rebuilds the page, which recreates this closure with a fresh baseline.
+        local function BarIsNever(barKey)
+            local s = EAB.db.profile.bars[barKey]
+            if not s then return false end
+            GetVisibilityKey(s) -- normalize legacy booleans into barVisibility
+            return s.barVisibility == "never" or s.alwaysHidden == true
+        end
+        local function BuildVisRow(barKey, leftLabel, disabledFn, disTip, trackNeverFlip)
+            local wasNever = trackNeverFlip and BarIsNever(barKey)
             local visRow, visH = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
                 { getStore = function()
                       local s = EAB.db.profile.bars[barKey]
@@ -1228,6 +1240,9 @@ initFrame:SetScript("OnEvent", function(self)
                       EAB:RefreshRuntimeVisibility()
                       EAB:RefreshMouseover()
                       EAB:ApplyCombatVisibility()
+                      if trackNeverFlip and BarIsNever(barKey) ~= wasNever then
+                          EllesmereUI:RefreshPage(true)
+                      end
                   end },
                 { type="dropdown", text="Visibility Options",
                   values={ __placeholder = "..." }, order={ "__placeholder" },
@@ -1374,7 +1389,11 @@ initFrame:SetScript("OnEvent", function(self)
             local function S() return EAB.db.profile.bars[barKey] end
 
             _, h = W:SectionHeader(parent, sectionTitle, y);  y = y - h
-            visRow = BuildVisRow(barKey, visLabel, _blizzDis, BLIZZ_DIS_TIP)
+            visRow = BuildVisRow(barKey, visLabel, _blizzDis, BLIZZ_DIS_TIP, true)
+
+            -- The rows below are HIDDEN entirely while the bar's visibility
+            -- is Never (BuildVisRow's trackNeverFlip rebuilds on the flip).
+            if BarIsNever(barKey) then return visRow end
 
             local wDis, wTip, wRaw = EllesmereUI.MatchGuard(barKey, "Width", _blizzDis, BLIZZ_DIS_TIP)
             local hDis, hTip, hRaw = EllesmereUI.MatchGuard(barKey, "Height", _blizzDis, BLIZZ_DIS_TIP)
@@ -1705,7 +1724,9 @@ initFrame:SetScript("OnEvent", function(self)
                     isSynced = function()
                         local src = SB()
                         for _, key in ipairs(GROUP_BAR_ORDER) do
-                            if not EllesmereUI.VisSelectionEquals(src, "barVisibility", EAB.db.profile.bars[key], "barVisibility") then return false end
+                            local dst = EAB.db.profile.bars[key]
+                            if not EllesmereUI.VisSelectionEquals(src, "barVisibility", dst, "barVisibility") then return false end
+                            if (src.dragShow or false) ~= (dst.dragShow or false) then return false end
                         end
                         return true
                     end,
@@ -1731,19 +1752,43 @@ initFrame:SetScript("OnEvent", function(self)
             -- Inline cog: Visibility settings (left region)
             do
                 local rgn = visRow1._leftRegion
+                local function MORow()
+                    return { type="toggle", label="Show All on Mouseover",
+                      tooltip="When hovering any action bar set to Mouseover, all Mouseover bars will appear.",
+                      get=function() return EAB.db.profile.mouseoverShowAll or false end,
+                      set=function(v)
+                          EAB.db.profile.mouseoverShowAll = v
+                      end }
+                end
+                -- Per-bar Show During Drag: only offered while THIS bar's
+                -- visibility is Never (every other mode already surfaces
+                -- during a drag). Two prebuilt popups; the cog opens the one
+                -- matching the selected bar's current mode, so the row
+                -- appears/disappears live with no page rebuild on visibility
+                -- or bar-selection changes.
+                local function DragRow()
+                    return { type="toggle", label="Show During Drag",
+                      tooltip="While dragging a spell or item, this bar appears so you can drop onto it.",
+                      get=function() return SB().dragShow == true end,
+                      set=function(v) SB().dragShow = v end }
+                end
                 local _, visCogShow = EllesmereUI.BuildCogPopup({
                     title = "Visibility",
-                    rows = {
-                        { type="toggle", label="Show All on Mouseover",
-                          tooltip="When hovering any action bar set to Mouseover, all Mouseover bars will appear.",
-                          get=function() return EAB.db.profile.mouseoverShowAll or false end,
-                          set=function(v)
-                              EAB.db.profile.mouseoverShowAll = v
-                          end },
-                    },
+                    rows = { MORow() },
+                })
+                local _, visCogShowNever = EllesmereUI.BuildCogPopup({
+                    title = "Visibility",
+                    rows = { MORow(), DragRow() },
                 })
                 local visCtrl = rgn._control
-                local visCogBtn = MakeCogBtn(rgn, visCogShow, visCtrl, EllesmereUI.COGS_ICON)
+                local visCogBtn = MakeCogBtn(rgn, function(anchor)
+                    local s = SB()
+                    if s.barVisibility == "never" or s.alwaysHidden then
+                        visCogShowNever(anchor)
+                    else
+                        visCogShow(anchor)
+                    end
+                end, visCtrl, EllesmereUI.COGS_ICON)
             end
         end
 

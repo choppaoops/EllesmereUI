@@ -213,6 +213,10 @@ function EAB.VisibilityCompat.Copy(dst, src, dstNoGroupModes)
         dst._savedBarAlpha = nil
     end
 
+    -- Per-bar Show During Drag travels with the visibility copy (inert unless
+    -- the target's mode is Never).
+    dst.dragShow = src.dragShow
+
     -- Multi-select set travels with the copy (after ApplyMode, so the
     -- scalar/set pair stays consistent). Group-axis items are stripped for
     -- targets that cannot express them (Pet Bar); the stripped selection
@@ -409,6 +413,7 @@ for _, info in ipairs(BAR_CONFIG) do
         combatHideEnabled = false,
         housingHideEnabled = false,
         barVisibility = "always",
+        dragShow = false,
         visHideHousing = false,
         visOnlyInstances = false,
         visHideMounted = false,
@@ -2541,6 +2546,25 @@ end
 --  OnEvent calls per tick (visible as screen-wide black blink).
 -------------------------------------------------------------------------------
 
+-- Usable-tint mirror for ForceButtonRefresh, hoisted to a named function so
+-- the pcall passes args instead of allocating a closure per call (this runs
+-- in the ACTIONBAR_SLOT_CHANGED storm path). On ns: file at the 200-local cap.
+ns._TintUsableIcon = function(icon, action)
+    local isUsable, noMana
+    if C_ActionBar and C_ActionBar.IsUsableAction then
+        isUsable, noMana = C_ActionBar.IsUsableAction(action)
+    elseif IsUsableAction then
+        isUsable, noMana = IsUsableAction(action)
+    end
+    if isUsable then
+        icon:SetVertexColor(1, 1, 1)
+    elseif noMana then
+        icon:SetVertexColor(0.5, 0.5, 1.0)
+    elseif isUsable ~= nil then
+        icon:SetVertexColor(0.4, 0.4, 0.4)
+    end
+end
+
 -- Full per-button visual refresh for slot CONTENT changes (spec swap,
 -- drag-drop: slot numbers stay, contents change -- force-less UpdateAction
 -- short-circuits on that exact case).
@@ -2582,21 +2606,7 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         -- Mirror Blizzard's UpdateUsable coloring (live ActionButton.lua);
         -- pcall-guarded in case the usability booleans are restricted, in
         -- which case the tint is left for the usable-event path.
-        pcall(function()
-            local isUsable, noMana
-            if C_ActionBar and C_ActionBar.IsUsableAction then
-                isUsable, noMana = C_ActionBar.IsUsableAction(action)
-            elseif IsUsableAction then
-                isUsable, noMana = IsUsableAction(action)
-            end
-            if isUsable then
-                icon:SetVertexColor(1, 1, 1)
-            elseif noMana then
-                icon:SetVertexColor(0.5, 0.5, 1.0)
-            elseif isUsable ~= nil then
-                icon:SetVertexColor(0.4, 0.4, 0.4)
-            end
-        end)
+        pcall(ns._TintUsableIcon, icon, action)
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
@@ -2814,7 +2824,11 @@ do
                                     -- the per-button OnEvent hook that used to
                                     -- sync it never sees this event now, so a
                                     -- vacated slot kept its background hidden.
-                                    local clip = EFD(btn).iconBgClip
+                                    -- Raw read (not EFD()): don't allocate
+                                    -- per-button state when the option never
+                                    -- built a clip.
+                                    local bfd = ns._eabFD[btn]
+                                    local clip = bfd and bfd.iconBgClip
                                     if clip then
                                         local p2 = EAB.db and EAB.db.profile
                                         clip:SetShown((p2 and p2.showBlizzIconBg or false) and not filled)
@@ -8552,6 +8566,26 @@ local function OnGridChange()
     -- equipment changes, bag sorts, etc. which should not affect mouseover.
 end
 
+-- Show All During Drag: restore bars saved as Never that were surfaced for a
+-- cursor drag (see the CURSOR_CHANGED handler). Idempotent -- safe from every
+-- drag-end path. Clears only the overrides the drag itself planted, so a
+-- toggle-keybind override the user set stays intact. If the drag ends in
+-- combat the driver swap is deferred: RefreshRuntimeVisibility skips secure
+-- writes there, and PLAYER_REGEN_ENABLED's ApplyAll re-runs it clean.
+function EAB._RestoreDragNeverBars()
+    local forced = _gridState._dragNeverForced
+    if not forced then return end
+    _gridState._dragNeverForced = nil
+    if EAB._visOverride then
+        for key in pairs(forced) do
+            if EAB._visOverride[key] == "always" then
+                EAB._visOverride[key] = nil
+            end
+        end
+    end
+    EAB:RefreshRuntimeVisibility()
+end
+
 -------------------------------------------------------------------------------
 --  Apply All orchestrates full visual application
 -------------------------------------------------------------------------------
@@ -9910,6 +9944,9 @@ function EAB:FinishSetup()
     _dragState.visible = false
     _dragState.strataCache = {}  -- [frame] = originalStrata
     local function ResetDragState()
+        -- Stale drag-forced Never bars (drag ended across a loading screen /
+        -- combat edge) go back to hidden with the rest of the drag state.
+        EAB._RestoreDragNeverBars()
         -- Force-restore all strata and clear drag visibility without the
         -- guard check, so stale state from spec changes etc. is always cleaned.
         _dragState.visible = false
@@ -10006,9 +10043,36 @@ function EAB:FinishSetup()
                         end
                     end
                 end
+                -- Show During Drag (per-bar opt-in, s.dragShow): surface bars
+                -- saved as Never so the drag can be dropped onto them.
+                -- Surgical -- every other visibility mode already shows
+                -- during a drag (the mouseover forcing above, conditional
+                -- drivers). Reuses the runtime _visOverride slot (never
+                -- persisted) and skips bars the toggle keybind already
+                -- overrides. Secure driver swaps are combat-blocked, so
+                -- combat drags leave Never bars hidden.
+                if not InCombatLockdown() and not _gridState._dragNeverForced then
+                    local forced
+                    for _, info in ipairs(BAR_CONFIG) do
+                        local s = EAB.db.profile.bars[info.key]
+                        if s and s.dragShow and s.enabled ~= false
+                           and (s.barVisibility == "never" or s.alwaysHidden)
+                           and not (EAB._visOverride and EAB._visOverride[info.key]) then
+                            EAB._visOverride = EAB._visOverride or {}
+                            EAB._visOverride[info.key] = "always"
+                            forced = forced or {}
+                            forced[info.key] = true
+                        end
+                    end
+                    if forced then
+                        _gridState._dragNeverForced = forced
+                        EAB:RefreshRuntimeVisibility()
+                    end
+                end
             end
         else
             SetDragVisible(false)
+            EAB._RestoreDragNeverBars()
             if _gridState.shown then
                 _gridState.shown = false
                 C_Timer_After(0, function()
@@ -10281,6 +10345,8 @@ function EAB:FinishSetup()
                 end
             end
         end
+        -- Re-hide Never bars surfaced by Show All During Drag.
+        EAB._RestoreDragNeverBars()
     end
     self:RegisterEvent("ACTIONBAR_HIDEGRID", OnGridHide)
     self:RegisterEvent("PET_BAR_HIDEGRID", OnGridHide)
@@ -10797,6 +10863,19 @@ end
 -------------------------------------------------------------------------------
 --  XP Bar
 -------------------------------------------------------------------------------
+-- Max-level check with layered fallbacks. The Is* helpers are nil-guarded, so
+-- client API churn can silently disable them -- a plain numeric compare
+-- against the expansion max level backstops the check so the bar can never
+-- show for a max-level character.
+function ns.XPBarAtMaxLevel()
+    local level = UnitLevel("player") or 0
+    if IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel() then return true end
+    if IsLevelAtEffectiveMaxLevel and IsLevelAtEffectiveMaxLevel(level) then return true end
+    local maxLevel = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion())
+        or (GetMaxPlayerLevel and GetMaxPlayerLevel())
+    return (maxLevel and level >= maxLevel) or false
+end
+
 local function UpdateXPBar()
     local frame, s = EAB_VTABLE.ExtraBars.BeginManagedDataBarUpdate("XPBar")
     if not frame then return end
@@ -10805,8 +10884,7 @@ local function UpdateXPBar()
     local text = frame._text
 
     -- Hide at max level (or XP disabled)
-    if (IsLevelAtEffectiveMaxLevel and IsLevelAtEffectiveMaxLevel(UnitLevel("player")))
-        or (IsXPUserDisabled and IsXPUserDisabled()) then
+    if ns.XPBarAtMaxLevel() or (IsXPUserDisabled and IsXPUserDisabled()) then
         EAB_VTABLE.ExtraBars.ApplyManagedNonSecurePresentation(BAR_LOOKUP["XPBar"], frame, s, false, true)
         return
     end
@@ -10889,8 +10967,7 @@ local function CreateXPBar()
     -- Tooltip
     holder:EnableMouse(true)
     holder:SetScript("OnEnter", function(self)
-        if (IsLevelAtEffectiveMaxLevel and IsLevelAtEffectiveMaxLevel(UnitLevel("player")))
-            or (IsXPUserDisabled and IsXPUserDisabled()) then return end
+        if ns.XPBarAtMaxLevel() or (IsXPUserDisabled and IsXPUserDisabled()) then return end
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         local currentXP = UnitXP("player")

@@ -176,73 +176,23 @@ function EQT.RefreshFonts()
     end
 end
 
--- Forces Blizzard to fully recompute block heights/positions after we
--- resize existing FontStrings (RestyleAll) or Blizzard only partially
--- relayouts around a focus change -- both leave stale cached block heights
--- that overlap the next block until a full ObjectiveTrackerFrame:Update()
--- runs (normally only happens on /reload).
+-- FORBIDDEN: calling ObjectiveTrackerFrame:Update() from addon execution,
+-- in ANY shape -- synchronous, deferred via C_Timer, or combat-gated with a
+-- regen retry. A forced Update() runs Blizzard's entire quest machinery in
+-- our (tainted) execution context, and the Lua tables that machinery
+-- materializes are served to secure code for the rest of the session:
+-- QuestEventListener callback tables, cached quest/task/mapInfo tables, and
+-- structural writes on the world map's data-provider objects. Secure map
+-- code reading any of them turns tainted mid-flight, which surfaces as
+-- "blocked in combat ... SetPassThroughButtons()" on every map pin refresh
+-- and secret-number compare errors in tooltip layout. Field taint logs from
+-- two testers (2026-07-18) confirmed this end to end; deferral does NOT
+-- launder taint (taint is execution-context, not call ancestry).
 --
--- Deferred via C_Timer.After(0) so this never runs inline inside whatever
--- callback triggered it: the documented SplashFrame taint (see
--- EllesmereUIQuestTracker_QoL.lua) came from calling Update() SYNCHRONOUSLY
--- inside a Blizzard secure call chain (OnHide during a quest turn-in flow).
--- A fresh timer tick, fired from a plain insecure options-panel action or
--- event handler, has no such ancestor. Also combat-gated because Update()
--- rebuilds the tracker's secure quest-item action buttons; if combat is
--- active when the tick fires, retry once on PLAYER_REGEN_ENABLED instead of
--- silently dropping the request.
---
--- TAINT-LOG VERIFIED 2026-07-10 (taintLog 1, empty log): the exact deferred +
--- combat-gated shape here -- relayout trigger, immediately enter combat, use
--- a quest-item button -- leaves no blocking taint on the current client. That
--- verification covers ONLY this shape: the retry listener is one-shot (it
--- unregisters on fire and re-arms per deferral) so Update() never runs more
--- often than requested, and the SYNCHRONOUS case in the QoL SplashFrame fix
--- remains forbidden. Do not widen this pattern without re-verifying.
-local _relayoutPending = false
-local _relayoutRetryFrame = nil
-local function DoTrackerRelayout()
-    if InCombatLockdown() then
-        if not _relayoutRetryFrame then
-            _relayoutRetryFrame = CreateFrame("Frame")
-            if not EQT._eventFrames then EQT._eventFrames = {} end
-            if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
-            local idx = #EQT._eventFrames + 1
-            EQT._eventFrames[idx] = _relayoutRetryFrame
-            EQT._eventRegistrations[idx] = {"PLAYER_REGEN_ENABLED"}
-            _relayoutRetryFrame:SetScript("OnEvent", function(self)
-                -- One-shot: without this, every combat end for the rest of the
-                -- session would run a full tracker Update nobody asked for.
-                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                if EQT.ForceTrackerRelayout then EQT.ForceTrackerRelayout() end
-            end)
-        end
-        _relayoutRetryFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        return
-    end
-    local otf = _G.ObjectiveTrackerFrame
-    if otf and otf.Update then
-        -- 12.1: Blizzard's scenario layout probes player auras during Update
-        -- (ShouldShowMawBuffs -> GetAuraDataByIndex), and aura APIs hard-error
-        -- when auras are secret and the caller is tainted -- which our forced
-        -- Update() is. Probe the same access first and skip the relayout while
-        -- secret; the tracker relayouts naturally on Blizzard's next update.
-        if EllesmereUI and EllesmereUI.IS_121
-           and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-            local ok = pcall(C_UnitAuras.GetAuraDataByIndex, "player", 1, "HELPFUL")
-            if not ok then return end
-        end
-        otf:Update()
-    end
-end
-function EQT.ForceTrackerRelayout()
-    if _relayoutPending then return end
-    _relayoutPending = true
-    C_Timer.After(0, function()
-        _relayoutPending = false
-        DoTrackerRelayout()
-    end)
-end
+-- Consequence we accept instead: after a font-size change or a focus
+-- change, Blizzard's cached block heights can be briefly stale (overlapping
+-- text) until its next natural relayout (any quest event). Cosmetic and
+-- self-healing; never reintroduce a forced Update() to fix it.
 
 -- Physical-pixel-perfect 1px accent divider under each section header.
 -- Parented to ObjectiveTrackerFrame (NOT the header) so collapse/expand
@@ -411,31 +361,30 @@ local function SkinHeader(header)
     -- Accent-colored 1px divider beneath the header.
     EnsureAccentDivider(header)
 
-    -- Click-anywhere-on-header overlay: forwards clicks to SetCollapsed so
-    -- clicking the title text (not just the +/- button) toggles the
-    -- section. The overlay is our own frame; we own its mouse state and
-    -- never touch Blizzard's frames' mouse state. Stops short of the
-    -- MinimizeButton so that button's native click still fires normally.
-    if not _headerClickOverlays[header] then
-        local overlay = CreateFrame("Button", nil, header)
+    -- Click-anywhere-on-header overlay: clicking the title text (not just
+    -- the +/- button) toggles the section. The overlay is a secure
+    -- click-redirect button: type="click" + clickbutton executes the
+    -- MinimizeButton's native handler in Blizzard's own (secure) context.
+    -- Never call MinimizeButton:Click() from our code -- a programmatic
+    -- Click() runs the entire collapse cascade (including a full tracker
+    -- relayout) under our taint, which poisons shared quest tables the
+    -- world map reads later (see the FORBIDDEN comment near the top of
+    -- this file). Headers without a MinimizeButton get no overlay for the
+    -- same reason. Setup is combat-deferred: creating/configuring a secure
+    -- button in lockdown is blocked, and SkinHeader runs again from the
+    -- SetCollapsed hook and RestyleAll, so a header first seen in combat
+    -- picks its overlay up on the next out-of-combat pass.
+    if not _headerClickOverlays[header] and header.MinimizeButton
+       and not InCombatLockdown() then
+        local minBtn = header.MinimizeButton
+        local overlay = CreateFrame("Button", nil, header,
+            "SecureActionButtonTemplate")
         overlay:SetFrameLevel(header:GetFrameLevel() + 1)
         overlay:RegisterForClicks("LeftButtonUp")
         overlay:SetPoint("TOPLEFT",     header, "TOPLEFT",     0, 0)
-        local minBtn = header.MinimizeButton
-        if minBtn then
-            overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
-        else
-            overlay:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
-        end
-        overlay:SetScript("OnClick", function()
-            -- Simulate a click on the MinimizeButton so Blizzard's full
-            -- collapse cascade runs (header state + tracker layout pass).
-            if header.MinimizeButton and header.MinimizeButton.Click then
-                header.MinimizeButton:Click("LeftButton")
-            elseif header.ToggleCollapsed then
-                header:ToggleCollapsed()
-            end
-        end)
+        overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
+        overlay:SetAttribute("type", "click")
+        overlay:SetAttribute("clickbutton", minBtn)
         _headerClickOverlays[header] = overlay
     end
 end
@@ -999,14 +948,9 @@ local _tighteningAnchor = false
 local function TightenTopAnchor(tracker)
     if _tighteningAnchor then return end
     if not tracker or not tracker.GetPoint or not tracker.SetPoint then return end
-    -- NOTE: previously guarded with InCombatLockdown(), which caused a
-    -- visible flicker -- every SetPoint call was skipped while in combat
-    -- (e.g. killing one mob while still fighting another), leaving the
-    -- tracker visibly at Blizzard's untightened -38 until combat ended.
-    -- ObjectiveTracker module frames are plain Frame objects (not a secure
-    -- template like ActionButton/UnitFrame), and SetPoint on a frame's own
-    -- position is not a protected call in that case -- verified safe via
-    -- in-combat multi-pull testing, no ADDON_ACTION_BLOCKED/taint errors.
+    if InCombatLockdown and InCombatLockdown() then return end
+    -- Do not interfere during Blizzard's collapse/expand slide animation,
+    -- or our SetPoint collides with ObjectiveTrackerSlidingMixin.
     if tracker.IsSliding and tracker:IsSliding() then return end
 
     local point, relativeTo, relativePoint, xOfs, yOfs = tracker:GetPoint(1)
@@ -1228,40 +1172,33 @@ function EQT.InitSkin()
     evt:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     evt:RegisterEvent("TRACKED_RECIPE_UPDATE")
     evt:RegisterEvent("SUPER_TRACKING_CHANGED")
-    -- Killing a mob while still in combat with other targets fires the
-    -- native Update() (and our SetPoint hook) while InCombatLockdown() is
-    -- true. TightenTopAnchor's combat guard correctly skips SetPoint in that
-    -- case (see comment there), but nothing previously re-ran the correction
-    -- once combat ended -- the anchor stayed at Blizzard's untightened -38
-    -- until some unrelated later event happened to trigger another Update.
-    -- That's what showed up as the padding flickering on/off with each loot,
-    -- depending on whether that particular kill left combat active. Catching
-    -- up here, once, right when combat lockdown lifts, closes that gap.
+    -- Combat catch-up for TightenTopAnchor: a tracker Update() fired while
+    -- still in combat (killing one mob while fighting another) hits the
+    -- InCombatLockdown() bail in TightenTopAnchor, leaving the top anchor
+    -- at Blizzard's untightened -38 until some later natural update. Re-run
+    -- the correction the moment lockdown lifts.
     evt:RegisterEvent("PLAYER_REGEN_ENABLED")
     -- Quest events just need a BG resize. Block skinning is handled by
     -- AddBlock/AddObjective/GetProgressBar/GetTimerBar hooks, so we no
     -- longer need to walk the entire tracker tree on every event.
     evt:SetScript("OnEvent", function(_, event)
-        if EQT.QueueResize then EQT.QueueResize() end
-        -- Focusing a quest can expand its objective text without Blizzard
-        -- relayouting sibling blocks underneath it; force a full relayout
-        -- for this event specifically (not the frequent quest-log events,
-        -- which already go through Blizzard's own native Update()).
-        if event == "SUPER_TRACKING_CHANGED" and EQT.ForceTrackerRelayout then
-            EQT.ForceTrackerRelayout()
-        end
-        if event == "PLAYER_REGEN_ENABLED" then
+        if event == "PLAYER_REGEN_ENABLED" and not ShouldSkipSkin() then
             EachTracker(function(t)
                 if SharesWidgetPool(t) then return end
                 TightenTopAnchor(t)
             end)
         end
+        -- Resize only. A forced ObjectiveTrackerFrame:Update() used to run
+        -- here on SUPER_TRACKING_CHANGED; removed -- see the FORBIDDEN
+        -- comment near the top of this file. Focus-change layout staleness
+        -- self-heals on Blizzard's next natural update.
+        if EQT.QueueResize then EQT.QueueResize() end
     end)
     if not EQT._eventFrames then EQT._eventFrames = {} end
     if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
     local idx = #EQT._eventFrames + 1
     EQT._eventFrames[idx] = evt
-    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED"}
+    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED", "PLAYER_REGEN_ENABLED"}
 
     -- OTF.Update / ObjectiveTracker_Update hooks REMOVED (session 68).
     -- They only called QueueResize, which is already triggered by
@@ -1283,10 +1220,11 @@ function EQT.InitSkin()
             if t.Header then SkinHeader(t.Header) end
             SkinExistingBlocks(t)
         end)
-        -- Font/color size changes just resized existing FontStrings in
-        -- place; Blizzard's cached block heights are now stale until a
-        -- full relayout runs (see EQT.ForceTrackerRelayout above).
-        if EQT.ForceTrackerRelayout then EQT.ForceTrackerRelayout() end
+        -- Font/color size changes resize existing FontStrings in place, so
+        -- Blizzard's cached block heights can be stale until its next
+        -- natural relayout (any quest event). We deliberately do NOT force
+        -- an ObjectiveTrackerFrame:Update() -- see the FORBIDDEN comment
+        -- near the top of this file for the taint post-mortem.
     end
 
     -- Live-update headers, blocks and progress bar fills when the user
@@ -1297,3 +1235,4 @@ function EQT.InitSkin()
         end })
     end
 end
+

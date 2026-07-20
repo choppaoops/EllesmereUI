@@ -3382,7 +3382,9 @@ local function Skin_Guild()
         -- runs inside that secure execution. Idles when the window is closed.
         if not GetFFD(cd2)._euiWidthWatcher then
             GetFFD(cd2)._euiWidthWatcher = true
-            local watcher = CreateFrame("Frame")
+            -- Parented to the window: the OnUpdate handler stops entirely
+            -- while the guild window is closed (hidden parents don't tick).
+            local watcher = CreateFrame("Frame", nil, f)
             local wasShown, acc = nil, 0
             watcher:SetScript("OnUpdate", function(_, elapsed)
                 if f and not f:IsShown() then return end

@@ -1345,6 +1345,25 @@ function ns.RescanThresholdTextFlag()
     end
 end
 
+-- Custom Icon gate: set ns._cdmAnyCustomIcon once if any saved spell (any
+-- spec) has a per-spell replacement icon configured. The re-stamp in
+-- DecorateFrame and the RefreshSpellTexture post-hooks are skipped entirely
+-- for anyone who never uses the feature -- 0 cost when off. Same monotonic,
+-- scanned-once contract as the flags above (the options popup flips the flag
+-- live on save). Purely per-spell: customIcon is never written to bar tiers,
+-- but ForEachSavedSettingsBlock walks per-spell entries anyway.
+function ns.RescanCustomIconFlag()
+    if ns._cdmAnyCustomIcon or ns._customIconFlagScanned then return end
+    if not EllesmereUIDB then return end
+    ns._customIconFlagScanned = true
+    ns.ForEachSavedSettingsBlock(function(ss)
+        if type(ss.customIcon) == "number" and ss.customIcon > 0 then
+            ns._cdmAnyCustomIcon = true
+            return true
+        end
+    end)
+end
+
 -------------------------------------------------------------------------------
 --  Spec helpers
 --
@@ -3335,7 +3354,8 @@ BuildCDMBar = function(barIndex)
 
     if not frame then
         frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
-        frame:SetFrameStrata("MEDIUM")
+        -- Per-bar Bar Strata (Extras); MEDIUM = the historical hardcoded value.
+        frame:SetFrameStrata(barData.barStrata or "MEDIUM")
         frame:SetFrameLevel(5)
         if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
         if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
@@ -3369,9 +3389,9 @@ BuildCDMBar = function(barIndex)
     -- Scale removed -- all sizing is width/height based now
     if not InCombatLockdown() then frame:SetScale(1) end
 
-    -- Restore default strata/level (skip if cursor-anchored; that path uses TOOLTIP/9980)
+    -- Restore configured strata/level (skip if cursor-anchored; that path uses TOOLTIP/9980)
     if not frame._mouseTrack then
-        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameStrata(barData.barStrata or "MEDIUM")
         frame:SetFrameLevel(5)
     end
 
@@ -3385,7 +3405,7 @@ BuildCDMBar = function(barIndex)
         end
         frame._preMousePos = nil
         -- Restore saved frame level when leaving cursor anchor
-        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameStrata(barData.barStrata or "MEDIUM")
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
         SetFrameClickThrough(frame, false)
@@ -3467,7 +3487,7 @@ BuildCDMBar = function(barIndex)
                 if icons then
                     for ii = 1, #icons do
                         if icons[ii] and icons[ii]:GetFrameStrata() == "TOOLTIP" then
-                            icons[ii]:SetFrameStrata("MEDIUM")
+                            icons[ii]:SetFrameStrata(barData.barStrata or "MEDIUM")
                             icons[ii]:SetFrameLevel(5 + ii)
                         end
                     end
@@ -4150,7 +4170,7 @@ LayoutCDMBar = function(barKey)
                 icon:SetFrameStrata("TOOLTIP")
                 icon:SetFrameLevel(9980 + i)
             else
-                icon:SetFrameStrata("MEDIUM")
+                icon:SetFrameStrata(barData.barStrata or "MEDIUM")
                 icon:SetFrameLevel(5 + i)
             end
             icon:ClearAllPoints()
@@ -4273,7 +4293,7 @@ LayoutCDMBar = function(barKey)
             icon:SetFrameStrata("TOOLTIP")
             icon:SetFrameLevel(9980 + i)
         else
-            icon:SetFrameStrata("MEDIUM")
+            icon:SetFrameStrata(barData.barStrata or "MEDIUM")
             icon:SetFrameLevel(5 + i)
         end
         icon:ClearAllPoints()
@@ -4876,6 +4896,8 @@ function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
     local fontScale = 1 / iconScale
     local showCD = barData and barData.showCooldownText
     if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
+    -- Only Show Numbers (bar setting): the countdown IS the icon on these bars.
+    if barData and barData.onlyShowNumbers then showCD = true end
     oCd:SetHideCountdownNumbers(not showCD)
     if not showCD then return end
     local cdFont = GetCDMFont()
@@ -5212,6 +5234,9 @@ local function RefreshCDMIconAppearance(barKey)
             -- Per-icon Duration Text override (ssb) falls back to the bar's values.
             local showCD = barData.showCooldownText
             if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
+            -- Only Show Numbers (bar setting): the countdown IS the icon, so it
+            -- overrides both the bar's Cooldown Text toggle and per-icon offs.
+            if barData.onlyShowNumbers then showCD = true end
             cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
             -- Per-spell Reverse Swipe: flips this icon's swipe direction away from
             -- the bar default (buffs fill up, cooldowns deplete). Entire block is
@@ -5612,6 +5637,11 @@ local function RefreshCDMIconAppearance(barKey)
                 end
             end
         end
+        -- Only Show Numbers (bar setting): re-hide the icon art AFTER the
+        -- passes above re-applied borders/shapes/textures, so the countdown
+        -- number is all that remains. One field read when the bar is off;
+        -- also restores one-shot right after the bar toggles off.
+        if ns.ApplyOnlyNumbers then ns.ApplyOnlyNumbers(icon, fd, barData) end
     end
 end
 ns.RefreshCDMIconAppearance = RefreshCDMIconAppearance
@@ -6540,9 +6570,11 @@ _CDMApplyVisibility = function()
                                 end
                             end
                             local icfc = _ecmeFC[ic]
-                            -- Off-by-default flag tested first: non-users short-circuit
-                            -- straight to the original branch (identical code, no added work).
-                            if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                            -- Off-by-default flags tested first: non-users short-circuit
+                            -- straight to the original branch (identical code, no added
+                            -- work). _missingHidden = hosted "Visibility When Missing:
+                            -- Hidden" placeholder (slot reserved, rendered invisible).
+                            if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
                                 -- Hide Icon: an Always-Show placeholder keeps its reserved
                                 -- layout slot but stays fully invisible (icon, border, bg).
                                 ic:SetAlpha(0)
@@ -6629,9 +6661,11 @@ local function ApplyBarOpacity(barKey)
             local ic = icons[i]
             if ic then
                 local icfc = _ecmeFC[ic]
-                -- Off-by-default flag tested first: non-users short-circuit straight
+                -- Off-by-default flags tested first: non-users short-circuit straight
                 -- to the original branch (identical code, no added work).
-                if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                -- _missingHidden = hosted "Visibility When Missing: Hidden"
+                -- placeholder (slot reserved, rendered invisible).
+                if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
                     -- Hide Icon: an Always-Show placeholder keeps its reserved
                     -- layout slot but stays fully invisible (icon, border, bg).
                     ic:SetAlpha(0)
@@ -6901,6 +6935,7 @@ BuildAllCDMBars = function()
     ns.RescanCustomForceCountFlag() -- set the "Show Charges" custom-spell gate (once)
     ns.RescanReverseSwipeFlag()   -- set the Reverse Swipe gate (once) before refresh
     ns.RescanThresholdTextFlag()  -- set the Threshold Text gate (once) before refresh
+    ns.RescanCustomIconFlag()     -- set the per-spell Custom Icon gate (once) before refresh
 
     local p = ECME.db.profile
 
@@ -7355,6 +7390,24 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
     local ghostList = ghostSd and ghostSd.assignedSpells
     local FindVar = ns.FindVariantIndexInList
 
+    -- Cd-claimed collided-buff slots (sd.assignedBuffCdIDs) are tracked by
+    -- COOLDOWN ID, deliberately outside assignedSpells. Materializing such
+    -- an icon's shared spellID here would, at the next route rebuild, drag
+    -- the UNCLAIMED twin onto the claiming bar too -- defeating the claim's
+    -- one-slot-only contract. Built once; stays nil (guard inert, zero
+    -- cost) unless a collided claim exists anywhere.
+    local claimedCd
+    if aprof and aprof.barSpells then
+        for _, bsd in pairs(aprof.barSpells) do
+            if type(bsd) == "table" and type(bsd.assignedBuffCdIDs) == "table" then
+                for cdID in pairs(bsd.assignedBuffCdIDs) do
+                    claimedCd = claimedCd or {}
+                    claimedCd[cdID] = true
+                end
+            end
+        end
+    end
+
     for _, barData in ipairs(p.cdmBars.bars) do
         -- cdUtilOnly (the automatic reseed path): buff-family bars are
         -- picker-authoritative -- materializing live buff icons would
@@ -7422,6 +7475,13 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                     -- only for the session but belong to their source bar's
                     -- assignedSpells (mirrors the EnsureAssignedSpells skip).
                     if sid and fc and fc._overflowLayoutBar then
+                        sid = nil
+                    end
+                    -- Skip cd-claimed collided-buff icons: their membership
+                    -- is the cooldownID claim, never a spellID slot (mirrors
+                    -- the hosted-buff membership rule above).
+                    if sid and claimedCd and icon.cooldownID
+                       and claimedCd[icon.cooldownID] then
                         sid = nil
                     end
                     if type(sid) == "number" and sid ~= 0 then
@@ -8019,7 +8079,7 @@ function ECME:CDMFinishSetup()
                             local frame = cdmBarFrames[key]
                             if not frame then
                                 frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
-                                frame:SetFrameStrata("MEDIUM")
+                                frame:SetFrameStrata(barData.barStrata or "MEDIUM")
                                 frame:SetFrameLevel(5)
                                 if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
                                 if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end

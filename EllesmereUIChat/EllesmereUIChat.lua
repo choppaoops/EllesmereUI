@@ -40,6 +40,7 @@ local CHAT_DEFAULTS = {
             bgR        = 0.03,
             bgG        = 0.045,
             bgB        = 0.05,
+            bgTexture  = "none",  -- chat background texture key (Unit Frames bar texture catalogue)
             timestampFormat = "%I:%M ",
             font = "__global",
             outlineMode = "__global",
@@ -190,6 +191,72 @@ local function GetFrameFontSize(id)
 end
 -- GetTabFontSize removed: tab font size hardcoded to 11
 
+-- Chat background texture catalogue: the same set as the Unit Frames bar
+-- texture dropdown (same shared media files), with SharedMedia statusbar
+-- textures appended through the shared EllesmereUI helper.
+local CHAT_TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
+ns.chatBgTextures = {
+    ["none"]          = nil,
+    ["melli"]         = CHAT_TEX_BASE .. "melli.tga",
+    ["beautiful"]     = CHAT_TEX_BASE .. "beautiful.tga",
+    ["plating"]       = CHAT_TEX_BASE .. "plating.tga",
+    ["atrocity"]      = CHAT_TEX_BASE .. "atrocity.tga",
+    ["divide"]        = CHAT_TEX_BASE .. "divide.tga",
+    ["glass"]         = CHAT_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = CHAT_TEX_BASE .. "fade-right.tga",
+    ["thin-line-top"]    = CHAT_TEX_BASE .. "thin-line-top.tga",
+    ["thin-line-bottom"] = CHAT_TEX_BASE .. "thin-line-bottom.tga",
+    ["fade"]          = CHAT_TEX_BASE .. "fade.tga",
+    ["gradient-lr"]   = CHAT_TEX_BASE .. "gradient-lr.tga",
+    ["gradient-rl"]   = CHAT_TEX_BASE .. "gradient-rl.tga",
+    ["gradient-bt"]   = CHAT_TEX_BASE .. "gradient-bt.tga",
+    ["gradient-tb"]   = CHAT_TEX_BASE .. "gradient-tb.tga",
+    ["matte"]         = CHAT_TEX_BASE .. "matte.tga",
+    ["sheer"]         = CHAT_TEX_BASE .. "sheer.tga",
+    ["blinkii-diamonds"] = CHAT_TEX_BASE .. "blinkii-diamonds.tga",
+    ["kringel-window"]   = CHAT_TEX_BASE .. "kringel-window.tga",
+}
+ns.chatBgTextureOrder = {
+    "none", "melli", "atrocity",
+    "fade", "fade-right",
+    "thin-line-top", "thin-line-bottom",
+    "beautiful", "plating",
+    "divide", "glass",
+    "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
+    "matte", "sheer",
+    "blinkii-diamonds", "kringel-window",
+}
+ns.chatBgTextureNames = {
+    ["none"]        = "None",
+    ["melli"]       = "Melli (ElvUI)",
+    ["beautiful"]   = "Beautiful",
+    ["plating"]     = "Plating",
+    ["atrocity"]    = "Atrocity",
+    ["divide"]      = "Divide",
+    ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["thin-line-top"]    = "Thin Line Top",
+    ["thin-line-bottom"] = "Thin Line Bottom",
+    ["fade"]        = "Fade",
+    ["gradient-lr"] = "Gradient Right",
+    ["gradient-rl"] = "Gradient Left",
+    ["gradient-bt"] = "Gradient Up",
+    ["gradient-tb"] = "Gradient Down",
+    ["matte"]       = "Matte",
+    ["sheer"]       = "Sheer",
+    ["blinkii-diamonds"] = "Blinkii Diamonds",
+    ["kringel-window"]   = "Kringel Window",
+}
+
+-- Refresh the catalogue from SharedMedia (idempotent; registers the
+-- late-registration callback on first call, same as the other modules).
+function ECHAT.RefreshBgTextureCatalogue()
+    if EllesmereUI.AppendSharedMediaTextures then
+        EllesmereUI.AppendSharedMediaTextures(
+            ns.chatBgTextureNames, ns.chatBgTextureOrder, nil, ns.chatBgTextures)
+    end
+end
+
 -- Apply background settings from DB to all skinned chat frames
 function ECHAT.ApplyBackground()
     local p = ECHAT.DB()
@@ -198,13 +265,33 @@ function ECHAT.ApplyBackground()
     BG_B = p.bgB or 0.05
     BG_A = p.bgAlpha or 0.65
 
+    -- Resolve the background texture ("none" = legacy solid color)
+    local texKey = p.bgTexture or "none"
+    local texPath
+    if texKey ~= "none" then
+        ECHAT.RefreshBgTextureCatalogue()
+        if EllesmereUI.ResolveTexturePath then
+            texPath = EllesmereUI.ResolveTexturePath(ns.chatBgTextures, texKey, nil)
+        else
+            texPath = ns.chatBgTextures[texKey]
+        end
+    end
+
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf and CFD(cf).bg then
             -- Update main bg texture
             local bgTex = CFD(cf).bg:GetRegions()
-            if bgTex and bgTex.SetColorTexture then
-                bgTex:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
+            if bgTex then
+                if texPath and bgTex.SetTexture then
+                    bgTex:SetTexture(texPath)
+                    bgTex:SetVertexColor(BG_R, BG_G, BG_B, BG_A)
+                elseif bgTex.SetColorTexture then
+                    -- Clear any texture-mode tint before returning to solid,
+                    -- or the color would double-tint through the vertex color.
+                    if bgTex.SetVertexColor then bgTex:SetVertexColor(1, 1, 1, 1) end
+                    bgTex:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
+                end
             end
         end
         -- Update skinned Blizzard tab backgrounds
@@ -2880,6 +2967,9 @@ initFrame:SetScript("OnEvent", function(self)
         local cf = _G["ChatFrame" .. i]
         if cf then SkinChatFrame(cf) end
     end
+    -- Re-run the background pass so a saved Background Texture applies at
+    -- login (the skin loop creates the bg textures with the solid color).
+    ECHAT.ApplyBackground()
     ---------------------------------------------------------------------------
     --  2b. Expanded font size options. Font is applied at skin time only.
     --      The global hooksecurefunc("FCF_SetChatWindowFontSize") was removed

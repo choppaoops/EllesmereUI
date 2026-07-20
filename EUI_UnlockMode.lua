@@ -601,6 +601,8 @@ EllesmereUI._ELEMENT_SETTINGS_MAP = {
     ["Bar6"]      = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("Bar6"),      highlightText = "Icon Size" },
     ["Bar7"]      = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("Bar7"),      highlightText = "Icon Size" },
     ["Bar8"]      = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("Bar8"),      highlightText = "Icon Size" },
+    ["Bar9"]      = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("Bar9"),      highlightText = "Icon Size" },
+    ["Bar10"]     = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("Bar10"),     highlightText = "Icon Size" },
     ["StanceBar"] = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("StanceBar"), highlightText = "Icon Size" },
     ["PetBar"]    = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("PetBar"),    highlightText = "Icon Size" },
     ["XPBar"]     = { module = "EllesmereUIActionBars",          page = "Bar Display",                  sectionName = "LAYOUT",  preSelectFn = SelectActionBar("XPBar"),     highlightText = "Icon Size" },
@@ -623,6 +625,12 @@ EllesmereUI._ELEMENT_SETTINGS_MAP = {
 
     -- Mythic+ Timer
     ["EMT_MythicTimer"]    = { module = "EllesmereUIMythicTimer",     page = "Mythic+ Timer",     sectionName = "DISPLAY",           highlightText = "Scale" },
+
+    -- Dragon Riding HUD (Blizz UI Enhanced > Dragon Riding page)
+    ["EDR_Cluster"]        = { module = "EllesmereUIBlizzardSkin",    page = "Dragon Riding",     sectionName = "GENERAL",           highlightText = "Enable Dragon Riding Bar" },
+
+    -- Minimap
+    ["EBS_Minimap"]        = { module = "EllesmereUIMinimap",         page = "Minimap",           sectionName = "DISPLAY",           highlightText = "Size" },
 
     -- Raid + Party Frames (separate registered pages/tabs)
     ["RF_RaidFrames"]      = { module = "EllesmereUIRaidFrames",      page = "Raid",              sectionName = "FRAME SIZES",       highlightText = "20 Man Frame Width" },
@@ -4860,17 +4868,13 @@ local function GetOrCreateSnapBorder(m)
     return brd
 end
 
-local SNAP_BG_R = 0.075 * 1.4
-local SNAP_BG_G = 0.113 * 1.4
-local SNAP_BG_B = 0.141 * 1.4
-
 local function ClearSnapHighlight()
     if snapHighlightKey and movers[snapHighlightKey] then
         local m = movers[snapHighlightKey]
         if m._snapBrd then m._snapBrd:SetColor(1, 1, 1, 0) end
         -- Restore normal overlay brightness
         if darkOverlaysEnabled and m._bg then
-            m._bg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+            m._bg:SetColorTexture(m._bgR or 0.075, m._bgG or 0.113, m._bgB or 0.141, 0.95)
         end
     end
     snapHighlightKey = nil
@@ -4888,7 +4892,7 @@ local function ShowSnapHighlight(targetKey)
         local old = movers[snapHighlightKey]
         if old._snapBrd then old._snapBrd:SetColor(1, 1, 1, 0) end
         if darkOverlaysEnabled and old._bg then
-            old._bg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+            old._bg:SetColorTexture(old._bgR or 0.075, old._bgG or 0.113, old._bgB or 0.141, 0.95)
         end
     end
     local m = movers[targetKey]
@@ -4899,9 +4903,9 @@ local function ShowSnapHighlight(targetKey)
     snapHighlightKey = targetKey
     snapHighlightElapsed = 0
     GetOrCreateSnapBorder(m)
-    -- Brighten overlay by 25%
+    -- Brighten the mover's base color
     if darkOverlaysEnabled and m._bg then
-        m._bg:SetColorTexture(SNAP_BG_R, SNAP_BG_G, SNAP_BG_B, 0.95)
+        m._bg:SetColorTexture((m._bgR or 0.075) * 1.4, (m._bgG or 0.113) * 1.4, (m._bgB or 0.141) * 1.4, 0.95)
     end
     if not snapHighlightAnim then
         snapHighlightAnim = CreateFrame("Frame")
@@ -5324,14 +5328,16 @@ EllesmereUI._DeselectSelectedMover = DeselectMover
 local function ApplyDarkOverlays()
     for _, m in pairs(movers) do
         if darkOverlaysEnabled then
-            m._bg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+            m._bg:SetColorTexture(m._bgR or 0.075, m._bgG or 0.113, m._bgB or 0.141, 0.95)
             if m._label then m._label:SetAlpha(1); m._label:Show() end
+            if m._subtitle then m._subtitle:SetAlpha(1); m._subtitle:Show() end
             if m._coordFS then m._coordFS:SetAlpha(1) end
             -- Action row is hover-only now, don't show it here
             if not m._dragging then m:SetAlpha(1) end
         else
             m._bg:SetColorTexture(0, 0, 0, 0)
             if m._label then m._label:Hide() end
+            if m._subtitle then m._subtitle:Hide() end
             -- When coords-always-on is active, show coords for all movers; otherwise hide
             if m._coordFS then
                 if coordsEnabled then
@@ -5640,13 +5646,15 @@ local BLIZZ_OWNED_OVERLAY_DEFS = {
     { label = "Encounter Bar", frame = function() return _G.PlayerPowerBarAlt end, showAlways = true, fallbackW = 240, fallbackH = 36, yOffset = 44 },
     { label = "Buffs",         frame = function() return _G.BuffFrame end },
     { label = "Debuffs",       frame = function() return _G.DebuffFrame end },
-    -- Blizzard Edit Mode's default tooltip anchor. The container is small/idle
-    -- when no tooltip is up, so use the showAlways fallback (read its saved
-    -- Edit Mode position) like the Encounter Bar.
+    -- Blizzard Edit Mode's default tooltip anchor. EUI permanently owns the
+    -- default tooltip position (see the fixed anchor in EllesmereUIBlizzardSkin,
+    -- which registers a real draggable mover), and Anchor to Cursor pins it to
+    -- the mouse -- in both cases this read-only Edit Mode overlay steps aside.
+    -- It only shows with "Reskin Tooltip" off, where Blizzard's Edit Mode
+    -- position genuinely applies again. The container is small/idle when no
+    -- tooltip is up, so use the showAlways fallback like the Encounter Bar.
     { label = "Tooltip",       frame = function()
-          -- Hidden while Anchor to Cursor is active: the tooltip follows the
-          -- mouse, so its Edit Mode location no longer applies.
-          if EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor then return nil end
+          if not (EllesmereUIDB and EllesmereUIDB.customTooltips == false) then return nil end
           return _G.GameTooltipDefaultContainer
       end, showAlways = true, fallbackW = 280, fallbackH = 165 },
 }
@@ -5861,11 +5869,18 @@ local function CreateMover(barKey)
     end)
     -- OnMouseUp is set later (after link buttons are created) to also handle link drag forwarding
 
-    -- Background (matches cogwheel dark color at 75% opacity)
+    -- Background (matches cogwheel dark color at 75% opacity). Elements may
+    -- override the base color via their moverBg definition field; the base is
+    -- stored on the mover so snap-highlight and dark-overlay repaints keep it.
+    local regElem = registeredElements[barKey]
+    local bgTint = regElem and regElem.moverBg
+    mover._bgR = bgTint and bgTint.r or 0.075
+    mover._bgG = bgTint and bgTint.g or 0.113
+    mover._bgB = bgTint and bgTint.b or 0.141
     local bg = mover:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     if darkOverlaysEnabled then
-        bg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+        bg:SetColorTexture(mover._bgR, mover._bgG, mover._bgB, 0.95)
     else
         bg:SetColorTexture(0, 0, 0, 0)
     end
@@ -5890,6 +5905,23 @@ local function CreateMover(barKey)
     nameFS:SetPoint("CENTER", mover, "CENTER")
     mover._label = nameFS
     if not darkOverlaysEnabled then nameFS:Hide() end
+
+    -- Optional dimmed subtitle under the label (element definition field)
+    if regElem and regElem.subtitle then
+        local subFS = labelFrame:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(subFS, true) end
+        subFS:SetFont(FONT_PATH, 8 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
+        subFS:SetText(EllesmereUI.L(regElem.subtitle))
+        subFS:SetTextColor(1, 1, 1, 0.40)
+        subFS:SetJustifyH("CENTER")
+        subFS:SetWordWrap(true)
+        subFS:SetNonSpaceWrap(false)
+        subFS:SetPoint("TOP", nameFS, "BOTTOM", 0, -3)
+        subFS:SetPoint("LEFT", labelFrame, "LEFT", 8, 0)
+        subFS:SetPoint("RIGHT", labelFrame, "RIGHT", -8, 0)
+        mover._subtitle = subFS
+        if not darkOverlaysEnabled then subFS:Hide() end
+    end
 
     -- Coordinate readout (shows during drag and selection, top-left of mover)
     local coordFS = labelFrame:CreateFontString(nil, "OVERLAY")

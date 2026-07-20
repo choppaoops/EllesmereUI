@@ -3077,14 +3077,13 @@ do
                 if PP.GetBorders(borderFrame) then
                     PP.UpdateBorder(borderFrame, size, r, g, b, a)
                     PP.ShowBorder(borderFrame)
-                    -- Restore alpha in case textured mode zeroed it
-                    local ppC = PP.GetBorders(borderFrame)
-                    if ppC then
-                        if ppC._top then ppC._top:SetAlpha(1) end
-                        if ppC._bottom then ppC._bottom:SetAlpha(1) end
-                        if ppC._left then ppC._left:SetAlpha(1) end
-                        if ppC._right then ppC._right:SetAlpha(1) end
-                    end
+                    -- No SetAlpha "restore" for textured-mode zeroing here: on
+                    -- Textures SetAlpha writes the SAME alpha state as
+                    -- SetVertexColor's 4th arg, so UpdateBorder's color write
+                    -- above already restores it -- and a hardcoded SetAlpha(1)
+                    -- stomps every fractional border alpha on re-apply (first
+                    -- apply takes the create branch and looks right; every
+                    -- later apply flashed to full alpha).
                 else
                     PP.CreateBorder(borderFrame, r, g, b, a, size, "OVERLAY", 7)
                 end
@@ -5221,6 +5220,11 @@ function EllesmereUI.MakeUnlockElement(opts)
         -- position-locked (no drag/nudge/anchor link), but resize and
         -- width/height matching stay available.
         keepMoverWhenAnchored = opts.keepMoverWhenAnchored,
+        -- moverBg: optional {r,g,b} base tint for the unlock mover background
+        -- (defaults to the standard dark overlay color when omitted).
+        -- subtitle: optional dimmed helper line shown under the mover label.
+        moverBg           = opts.moverBg,
+        subtitle          = opts.subtitle,
     }
 end
 
@@ -8819,7 +8823,7 @@ local function CreateMainFrame()
         end
     end
 
-    -- Done  (right side, FOOTER_PAD from right edge, green, closes window)
+    -- Close  (right side, FOOTER_PAD from right edge, green, closes window)
     do
         local btn = CreateFrame("Button", nil, footerFrame)
         PanelPP.Size(btn, DONE_BTN_W, FOOTER_BTN_H)
@@ -8829,7 +8833,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b)
-        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Done"))
+        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Close"))
         -- Hover animation reads from ELLESMERE_GREEN live
         local FADE_DUR = 0.1
         local progress, target = 0, 0
@@ -9294,6 +9298,13 @@ end
 
 function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     if not activeModule or not activePage then return end
+    -- Active search force-expands every "Show Less Common" section (links
+    -- hidden entirely); clearing collapses them back to session state. Must
+    -- run BEFORE the cache lookup below: a state transition rebuilds and
+    -- replaces this page's cache entry (see SetLessCommonSearchActive).
+    if EllesmereUI.SetLessCommonSearchActive then
+        EllesmereUI.SetLessCommonSearchActive(query ~= nil and query ~= "")
+    end
     local cacheKey = activeModule .. "::" .. activePage
     local cached = _pageCache[cacheKey]
     if not cached or not cached.wrapper then return end
@@ -10668,7 +10679,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.5.1"
+EllesmereUI.VERSION = "8.5.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11166,7 +11177,7 @@ do
         local f = CreateFrame("Frame", "EllesmereUIDevModeBadge", UIParent)
         f:SetFrameStrata("HIGH")
         f:SetHeight(26)
-        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -16)
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -41)
         f:EnableMouse(false)
         f:Hide()
 
@@ -11541,7 +11552,14 @@ initFrame:SetScript("OnEvent", function(self, event)
                     local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
                     local _, size, flags = cfs:GetFont()
                     cfs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
-                    if EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); cfs:SetTextColor(r,g,b,1) end
+                    -- Native mode keeps the branded inline-code labels set by
+                    -- the Layout hook; only explicit modes flat-recolor.
+                    if EllesmereUI._getPopupMenuElementMode
+                       and EllesmereUI._getPopupMenuElementMode() ~= "native"
+                       and EllesmereUI._getPopupMenuButtonTextColor then
+                        local r,g,b=EllesmereUI._getPopupMenuButtonTextColor()
+                        cfs:SetTextColor(r,g,b,1)
+                    end
                 end
             end
         end
@@ -11601,13 +11619,32 @@ initFrame:SetScript("OnEvent", function(self, event)
             local lastBtn = anchorBtn
             local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
             local btnFontSize = 13
+            -- Branded two-tone labels are the default (native mode, or when
+            -- BlizzardSkin is not loaded) -- applied via inline color codes
+            -- in SetText, which works with the pause-menu reskin off, exactly
+            -- as before 8.5.2. Only an explicitly chosen Element & Text Color
+            -- mode switches to a plain label + whole-string recolor (inline
+            -- codes would override SetTextColor otherwise).
+            local elemMode = EllesmereUI._getPopupMenuElementMode
+                and EllesmereUI._getPopupMenuElementMode() or "native"
+            local brandHex
+            if elemMode == "native" then
+                local EG = EllesmereUI.ELLESMERE_GREEN or { r = .27, g = .86, b = .49 }
+                brandHex = string.format("|cff%02x%02x%02x",
+                    math.floor(EG.r * 255 + 0.5), math.floor(EG.g * 255 + 0.5),
+                    math.floor(EG.b * 255 + 0.5))
+            end
 
             if showEUI then
                 btn:Show()
-                btn:SetText("EllesmereUI")
+                if brandHex then
+                    btn:SetText(brandHex .. "Ellesmere|r|cffffffffUI|r")
+                else
+                    btn:SetText("EllesmereUI")
+                end
                 if _reskinMenu then
                     local fs = btn:GetFontString()
-                    if fs then fs:SetFont(euiFont, btnFontSize, ""); if EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs:SetTextColor(r,g,b,1) end end
+                    if fs then fs:SetFont(euiFont, btnFontSize, ""); if not brandHex and EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs:SetTextColor(r,g,b,1) end end
                 end
                 btn:ClearAllPoints()
                 btn:SetPoint("TOP", lastBtn, "BOTTOM", 0, -12)
@@ -11616,10 +11653,14 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             if showUnlock then
                 unlockBtn:Show()
-                unlockBtn:SetText("EUI Unlock Mode")
+                if brandHex then
+                    unlockBtn:SetText(brandHex .. "EUI|r |cffffffffUnlock Mode|r")
+                else
+                    unlockBtn:SetText("EUI Unlock Mode")
+                end
                 if _reskinMenu then
                     local fs2 = unlockBtn:GetFontString()
-                    if fs2 then fs2:SetFont(euiFont, btnFontSize, ""); if EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs2:SetTextColor(r,g,b,1) end end
+                    if fs2 then fs2:SetFont(euiFont, btnFontSize, ""); if not brandHex and EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs2:SetTextColor(r,g,b,1) end end
                 end
                 unlockBtn:ClearAllPoints()
                 unlockBtn:SetPoint("TOP", lastBtn, "BOTTOM", 0, showEUI and -4 or -12)
