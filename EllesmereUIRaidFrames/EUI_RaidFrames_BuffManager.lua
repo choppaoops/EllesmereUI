@@ -511,7 +511,7 @@ end
 
 -- Fallback icon textures for secret auras (icon field is also secret)
 local SECRET_SPELL_ICONS = {
-    [102342] = 136097,   -- Ironbark
+    [102342] = 572025,   -- Ironbark
     [33206]  = 135936,   -- Pain Suppression
     [10060]  = 135939,   -- Power Infusion
     [47788]  = 237542,   -- Guardian Spirit

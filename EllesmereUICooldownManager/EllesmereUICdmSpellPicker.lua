@@ -1880,7 +1880,6 @@ function ns.AddCDMBar(barType, name, numRows)
         outOfRangeOverlay = false,
         pandemicGlow = true,
         pandemicGlowStyle = -1,
-        pandemicGlowColor = { r = 1, g = 1, b = 0 },
         pandemicGlowLines = 8,
         pandemicGlowThickness = 2,
         pandemicGlowSpeed = 4,

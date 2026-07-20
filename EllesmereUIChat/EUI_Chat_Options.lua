@@ -258,6 +258,35 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row: Background Texture (Unit Frames bar texture catalogue incl.
+        -- SharedMedia, with per-item texture preview backgrounds) | (empty)
+        do
+            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
+            local btValues, btOrder = {}, {}
+            local texNames = ns.chatBgTextureNames or {}
+            for _, key in ipairs(ns.chatBgTextureOrder or {}) do
+                if key ~= "---" then
+                    btValues[key] = texNames[key] or key
+                    btOrder[#btOrder + 1] = key
+                end
+            end
+            local texLookup = ns.chatBgTextures or {}
+            btValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    return texLookup[key]
+                end,
+            }
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Background Texture",
+                  tooltip="Texture drawn over the chat background color.",
+                  values=btValues, order=btOrder,
+                  getValue=function() return Cfg("bgTexture") or "none" end,
+                  setValue=function(v) Set("bgTexture", v); RefreshAll() end },
+                { type="label", text="" })
+            y = y - h
+        end
+
         -- -- SIDEBAR -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "SIDEBAR", y); y = y - h
 
