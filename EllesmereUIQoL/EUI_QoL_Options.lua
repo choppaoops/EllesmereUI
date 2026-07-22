@@ -10,6 +10,7 @@ local PAGE_BREZ     = "BattleRes"
 local PAGE_AUTOLOG  = "Keys, Logs & Brez"
 local PAGE_UPGCALC  = "Upgrade Calc"
 local PAGE_SHIFTER  = "Shifter"
+local PAGE_MOVEMENT = "Movement Alerts"
 
 -------------------------------------------------------------------------------
 --  Hide Item Transforms picker popup
@@ -2362,8 +2363,8 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIQoL", {
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
-        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_AUTOLOG, PAGE_UPGCALC, PAGE_SHIFTER },
-        searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs", "upgrade", "ilvl", "item level", "crest", "upgrade calculator", "shifter", "move", "drag", "position", "demodal", "drift", "combat alert", "enter combat", "leave combat", "in combat", "combat text", "combat notification", "transform", "transforms", "costume", "disguise", "chef's hat", "noggenfogger", "target distance", "distance to target", "range text", "yard", "yards" },
+        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_AUTOLOG, PAGE_UPGCALC, PAGE_SHIFTER, PAGE_MOVEMENT },
+        searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs", "upgrade", "ilvl", "item level", "crest", "upgrade calculator", "shifter", "move", "drag", "position", "demodal", "drift", "combat alert", "enter combat", "leave combat", "in combat", "combat text", "combat notification", "transform", "transforms", "costume", "disguise", "chef's hat", "noggenfogger", "target distance", "distance to target", "range text", "yard", "yards", "movement", "mobility", "gap closer", "blink", "gateway", "warlock gateway", "control shard", "time spiral", "free movement" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_QOL then
                 return BuildQoLPage(pageName, parent, yOffset)
@@ -2379,6 +2380,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pageName == PAGE_SHIFTER and _G._EUI_BuildShifterPage then
                 return _G._EUI_BuildShifterPage(pageName, parent, yOffset)
+            end
+            if pageName == PAGE_MOVEMENT and _G._EUI_BuildMovementAlertPage then
+                return _G._EUI_BuildMovementAlertPage(pageName, parent, yOffset)
             end
         end,
         onReset = function()
