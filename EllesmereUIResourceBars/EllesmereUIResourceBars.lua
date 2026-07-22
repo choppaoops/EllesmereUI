@@ -1048,6 +1048,11 @@ local DEFAULTS = {
             bandMode = "percent",  -- "percent" | "value" (bar/health/power only)
             bandReverse = false,
             bands = {},            -- ordered ascending by `to`: { { to=N, r,g,b,a }, ... }
+            hashEnabled = false,
+            hashValues  = "",          -- e.g. "25, 50, 75"
+            hashMode    = "percent",
+            hashWidth   = 1,
+            hashColorR  = 1, hashColorG = 1, hashColorB = 1, hashColorA = 0.7,
         },
         primary = {
             enabled     = true,
@@ -1097,6 +1102,12 @@ local DEFAULTS = {
             bandMode = "percent",
             bandReverse = false,
             bands = {},
+            -- User hash lines (opt-in). See health.hashEnabled for semantics.
+            hashEnabled = false,
+            hashValues  = "",
+            hashMode    = "percent",
+            hashWidth   = 1,
+            hashColorR  = 1, hashColorG = 1, hashColorB = 1, hashColorA = 0.7,
             expandIfNoResource = false,
             -- Shift elements anchored to the power bar when the spec has no
             -- primary power (e.g. BM/MM Hunter, whose Focus shows as the class
@@ -2521,7 +2532,10 @@ end
 --   Bar-type only; pip resources always use counts. Default false (legacy).
 -- maxRenderVal (optional): suppress any tick whose resource-value position exceeds
 -- it (e.g. Devourer in Void Meta caps at 39 so nothing renders at the 40 edge).
-local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, hashR, hashG, hashB, hashA, hashIsPercent, maxRenderVal)
+-- vInset (optional): amount to shrink each tick vertically at the top and
+-- bottom, so hash lines sit inside the border instead of spanning over it. Default
+-- 0. Callers pass borderSize * PP.mult.
+local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, hashR, hashG, hashB, hashA, hashIsPercent, maxRenderVal, vInset)
     local vals = ParseTickValues(tickStr)
 
     for i = 1, #tickCache do tickCache[i]:Hide() end
@@ -2557,6 +2571,10 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
     local pxW = PP and (tickW * PP.mult) or tickW
     local barW = sb:GetWidth()
     local barH = sb:GetHeight()
+    local vI = vInset or 0
+    -- Clamp so a fat border on a short bar can never invert the height.
+    if vI * 2 >= barH then vI = math.max(0, (barH - 1) / 2) end
+    local tickH = barH - vI * 2
     for i, v in ipairs(vals) do
         local frac, inRange
         if hashIsPercent then
@@ -2576,11 +2594,43 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
             t:SetColorTexture(tR, tG, tB, tA)
             t:ClearAllPoints()
             local off = PP and PP.Scale(barW * frac) or (barW * frac)
-            t:SetSize(pxW, barH)
-            t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, 0)
+            t:SetSize(pxW, tickH)
+            t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, -vI)
             t:Show()
         end
     end
+end
+
+-- Value mode needs a readable max: getMaxFn returns the current max, if
+-- it is secret we fall back to a last-known-good value cached on the bar frame
+function ns.ApplyHashLines(sb, cfg, getMaxFn)
+    if not sb then return end
+    local tickCache = sb._userHashTicks
+    if not (cfg and cfg.hashEnabled) then
+        if tickCache then for i = 1, #tickCache do tickCache[i]:Hide() end end
+        return
+    end
+    if not tickCache then tickCache = {}; sb._userHashTicks = tickCache end
+    local isPercent = (cfg.hashMode or "percent") == "percent"
+    local maxVal
+    if isPercent then
+        maxVal = 100
+    else
+        local mx = getMaxFn and getMaxFn() or nil
+        if mx and issecretvalue and issecretvalue(mx) then mx = nil end
+        if mx and mx > 0 then
+            sb._hashMaxCache = mx
+        else
+            mx = sb._hashMaxCache  -- last-known-good, or nil on first secret read
+        end
+        maxVal = mx or 0
+    end
+    -- Shrink the hash vertically by the border so it sits inside the bar
+    local PP = EllesmereUI and EllesmereUI.PP
+    local vInset = (cfg.borderSize or 0) * ((PP and PP.mult) or 1)
+    ApplyResourceBarTicks(sb, maxVal, cfg.hashValues, tickCache,
+        cfg.hashWidth, cfg.hashColorR, cfg.hashColorG, cfg.hashColorB, cfg.hashColorA,
+        isPercent, nil, vInset)
 end
 
 -- Moving-hash overlay for the Guardian Ironfur bar. Lives above the inner
@@ -3447,6 +3497,17 @@ local function BuildBars()
             end
         end
         EllesmereUI.SetElementVisibility(secondaryFrame, false)
+    end
+
+    -- Hash lines on the health and power bars 
+    do
+        local _prof = ERB.db and ERB.db.profile
+        if _prof then
+            ns.ApplyHashLines(healthBar, _prof.health,
+                function() return UnitHealthMax("player") end)
+            ns.ApplyHashLines(primaryBar, _prof.primary,
+                function() return UnitPowerMax("player", GetPrimaryPowerType()) end)
+        end
     end
 
     ReapplyInternalBarAnchors()
@@ -6194,13 +6255,13 @@ end
         spark:SetSize(8, h)
         spark:ClearAllPoints()
     
-        if cb.gradientEnabled and castBarFrame._gradClip then
+    if cb.gradientEnabled and castBarFrame._gradClip then
             spark:SetPoint("CENTER", castBarFrame._gradClip, "RIGHT", 0, 0)
         else
             spark:SetPoint("CENTER", fillTex, "RIGHT", 0, 0)
         end
     
-        spark:Show()
+    spark:Show()
     else
         spark:Hide()
     end
@@ -6502,7 +6563,7 @@ UpdateCastBar = function(dt)
     if castBarFrame._spark:IsShown() then
         castBarFrame._spark:ClearAllPoints()
     
-        if castBarFrame._gradientFullBar and castBarFrame._gradClip and castBarFrame._gradClip:IsShown() then
+    if castBarFrame._gradientFullBar and castBarFrame._gradClip and castBarFrame._gradClip:IsShown() then
             castBarFrame._spark:SetPoint("CENTER", castBarFrame._gradClip, "RIGHT", 0, 0)
         else
             castBarFrame._spark:SetPoint("CENTER", bar:GetStatusBarTexture(), "RIGHT", 0, 0)

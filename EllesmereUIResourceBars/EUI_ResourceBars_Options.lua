@@ -1003,6 +1003,88 @@ initFrame:SetScript("OnEvent", function(self)
         cogBtn:SetScript("OnClick", function(self) showFn(self) end)
         return cogBtn
     end
+
+    ---------------------------------------------------------------------------
+    --  BuildHashCog: dedicated cog + popup for simple per-bar hash lines.
+    --  Used by the Health and Power bar sections.
+    --
+    --  cfg = { parentRgn, getBarData, refreshFn, disabledFn, disabledTip, popupTitle, anchorTo }
+    --  Returns: cogBtn
+    ---------------------------------------------------------------------------
+    local function BuildHashCog(cfg)
+        local getBarData = cfg.getBarData
+        local refreshFn  = cfg.refreshFn or function() end
+
+        -- Normalise a comma-separated positions string to clean numbers.
+        local function SanitizePositions(str)
+            if not str or str == "" then return "" end
+            local out = {}
+            for token in tostring(str):gmatch("[^,]+") do
+                local n = tonumber((token:gsub("%s", "")))
+                if n and n >= 0 then out[#out + 1] = tostring(n) end
+            end
+            return table.concat(out, ", ")
+        end
+
+        local function HashOff()
+            local c = getBarData()
+            return not (c and c.hashEnabled)
+        end
+
+        local DIS_TIP = EllesmereUI.L("Enable hash lines first")
+        local rows = {
+            { type = "toggle", label = EllesmereUI.L("Show Hash Lines"),
+              tooltip = EllesmereUI.L("Draw tick lines across the bar at positions you choose."),
+              get = function() local c = getBarData(); return c and c.hashEnabled or false end,
+              set = function(v) local c = getBarData(); if not c then return end
+                  c.hashEnabled = v and true or false; refreshFn() end },
+            { type = "input", label = EllesmereUI.L("Positions"), inputWidth = 130,
+              commitOnBlur = true,
+              disabled = HashOff,
+              disabledTooltip = DIS_TIP,
+              get = function() local c = getBarData(); return c and c.hashValues or "" end,
+              set = function(v) local c = getBarData(); if not c then return end
+                  c.hashValues = SanitizePositions(v); refreshFn() end },
+            { type = "segmented", label = EllesmereUI.L("Mode"),
+              disabled = HashOff,
+              disabledTooltip = DIS_TIP,
+              keys = { "percent", "value" }, labels = { "%", EllesmereUI.L("Value") },
+              get = function() local c = getBarData(); return (c and c.hashMode) or "percent" end,
+              set = function(k) local c = getBarData(); if not c then return end
+                  c.hashMode = k; refreshFn() end },
+            { type = "slider", label = EllesmereUI.L("Thickness"), min = 1, max = 5, step = 1,
+              disabled = HashOff,
+              disabledTooltip = DIS_TIP,
+              get = function() local c = getBarData(); return c and c.hashWidth or 1 end,
+              set = function(v) local c = getBarData(); if not c then return end
+                  c.hashWidth = v; refreshFn() end },
+            { type = "colorpicker", label = EllesmereUI.L("Color"), hasAlpha = true,
+              disabled = HashOff,
+              disabledTooltip = DIS_TIP,
+              get = function()
+                  local c = getBarData()
+                  if not c then return 1, 1, 1, 0.7 end
+                  return c.hashColorR or 1, c.hashColorG or 1, c.hashColorB or 1, c.hashColorA or 0.7
+              end,
+              set = function(r, g, b, a)
+                  local c = getBarData(); if not c then return end
+                  c.hashColorR, c.hashColorG, c.hashColorB, c.hashColorA = r, g, b, a
+                  refreshFn()
+              end },
+        }
+
+        local _, showFn = EllesmereUI.BuildCogPopup({
+            title = cfg.popupTitle or EllesmereUI.L("Hash Lines"), bgAlpha = 1,
+            frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500,
+            rows = rows,
+        })
+
+        local cogBtn = MakeCogBtn(cfg.parentRgn, showFn, cfg.anchorTo)
+        local tip = EllesmereUI.L("Hash Lines")
+        cogBtn:HookScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, tip) end)
+        cogBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+        return cogBtn
+    end
     -- Druid-only per-form popup button. `field` picks the map the toggles write:
     -- "textDisabledForms" (text rows) or "barDisabledForms" (whole-bar enable rows).
     local function AddFormDisableBtn(rgn, leftOf, cfgFn, refreshFn, field, title, tooltip)
@@ -3575,7 +3657,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        BuildThresholdSettingsButton({
+        local healthSettingsBtn = BuildThresholdSettingsButton({
             parentRgn = healthColorRow._rightRegion,
             getBarData = function() return cfg() end,
             singleSpec = ctx.advanced or nil,
@@ -3589,6 +3671,14 @@ initFrame:SetScript("OnEvent", function(self)
             threshMin = 1, threshMax = 99,
             popupTitle = "Health Bar Threshold",
             defaultR = 1.0, defaultG = 0.2, defaultB = 0.2, defaultA = 1,
+        })
+
+        BuildHashCog({
+            parentRgn = healthColorRow._rightRegion,
+            anchorTo = healthSettingsBtn,
+            getBarData = function() return DB().health end,
+            refreshFn = function() RebuildHealth() end,
+            popupTitle = EllesmereUI.L("Health Bar Hash Lines"),
         })
         -- Thresholds have their own per-spec system: lock the slot whenever a
         -- Spec Overrides editing session is active.
@@ -4338,7 +4428,7 @@ initFrame:SetScript("OnEvent", function(self)
                 c.thresholdSpecs = { single }
             end
         end
-        BuildThresholdSettingsButton({
+        local powerSettingsBtn = BuildThresholdSettingsButton({
             parentRgn = powerColorRow._rightRegion,
             getBarData = function() return cfg() end,
             singleSpec = ctx.advanced or nil,
@@ -4353,6 +4443,14 @@ initFrame:SetScript("OnEvent", function(self)
             popupTitle = "Power Bar Threshold",
             defaultR = 1.0, defaultG = 0.2, defaultB = 0.2, defaultA = 1,
             formCapable = true,
+        })
+
+        BuildHashCog({
+            parentRgn = powerColorRow._rightRegion,
+            anchorTo = powerSettingsBtn,
+            getBarData = function() return DB().primary end,
+            refreshFn = function() RebuildPower() end,
+            popupTitle = EllesmereUI.L("Power Bar Hash Lines"),
         })
         -- Thresholds have their own per-spec system: lock the slot whenever a
         -- Spec Overrides editing session is active.

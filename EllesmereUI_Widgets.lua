@@ -5092,28 +5092,40 @@ local function BuildCogPopup(opts)
                 local SAVE_W = 34
                 local SAVE_GAP = 4
 
-                -- Save button (always visible, right of input)
-                local EG = ELLESMERE_GREEN
-                local saveBtn = CreateFrame("Button", nil, pf)
-                saveBtn:SetSize(SAVE_W, ROW_H - 4)
-                saveBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
-                saveBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
-                local saveBg = SolidTex(saveBtn, "BACKGROUND", EG.r, EG.g, EG.b, 0.85)
-                saveBg:SetAllPoints()
-                local saveLbl = MakeFont(saveBtn, 10, nil, 1, 1, 1)
-                saveLbl:SetAlpha(0.9)
-                saveLbl:SetText(EllesmereUI.L("Save"))
-                saveLbl:SetPoint("CENTER")
-                saveBtn:SetScript("OnEnter", function()
-                    saveBg:SetColorTexture(EG.r + (1 - EG.r) * 0.25, EG.g + (1 - EG.g) * 0.25, EG.b + (1 - EG.b) * 0.25, 0.95)
-                    saveLbl:SetAlpha(1)
-                end)
-                saveBtn:SetScript("OnLeave", function() saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85); saveLbl:SetAlpha(0.9) end)
+                -- commitOnBlur mode: no Save button; commit on Enter and on focus
+                -- loss (matches the threshold EditBoxes). Otherwise the classic
+                -- explicit Save button.
+                local commitOnBlur = row.commitOnBlur
 
-                -- Input box (left of save button)
+                -- Save button (right of input) -- omitted in commitOnBlur mode.
+                local EG = ELLESMERE_GREEN
+                local saveBtn, saveBg, saveLbl
+                if not commitOnBlur then
+                    saveBtn = CreateFrame("Button", nil, pf)
+                    saveBtn:SetSize(SAVE_W, ROW_H - 4)
+                    saveBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                    saveBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
+                    saveBg = SolidTex(saveBtn, "BACKGROUND", EG.r, EG.g, EG.b, 0.85)
+                    saveBg:SetAllPoints()
+                    saveLbl = MakeFont(saveBtn, 10, nil, 1, 1, 1)
+                    saveLbl:SetAlpha(0.9)
+                    saveLbl:SetText(EllesmereUI.L("Save"))
+                    saveLbl:SetPoint("CENTER")
+                    saveBtn:SetScript("OnEnter", function()
+                        saveBg:SetColorTexture(EG.r + (1 - EG.r) * 0.25, EG.g + (1 - EG.g) * 0.25, EG.b + (1 - EG.b) * 0.25, 0.95)
+                        saveLbl:SetAlpha(1)
+                    end)
+                    saveBtn:SetScript("OnLeave", function() saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85); saveLbl:SetAlpha(0.9) end)
+                end
+
+                -- Input box (left of save button, or flush right in commitOnBlur mode)
                 local box = CreateFrame("EditBox", nil, pf)
                 box:SetSize(inputW, ROW_H - 4)
-                box:SetPoint("RIGHT", saveBtn, "LEFT", -SAVE_GAP, 0)
+                if commitOnBlur then
+                    box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                else
+                    box:SetPoint("RIGHT", saveBtn, "LEFT", -SAVE_GAP, 0)
+                end
                 box:SetAutoFocus(false)
                 box:SetFont(EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
                 box:SetTextColor(1, 1, 1, POPUP_INPUT_A)
@@ -5122,17 +5134,23 @@ local function BuildCogPopup(opts)
                 boxBg:SetAllPoints()
                 box:SetText(row.get and row.get() or "")
 
+                local _committing = false  -- guard ClearFocus -> OnEditFocusLost reentry
                 local function ApplyInput()
+                    if _committing then return end
+                    _committing = true
                     box:ClearFocus()
                     if row.set then row.set(box:GetText()) end
                     if pf._refresh then pf._refresh() end
                     -- Brief white flash on save button as confirmation
-                    saveBg:SetColorTexture(1, 1, 1, 0.9)
-                    saveLbl:SetText(EllesmereUI.L("Saved"))
-                    C_Timer.After(0.4, function()
-                        saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85)
-                        saveLbl:SetText(EllesmereUI.L("Save"))
-                    end)
+                    if saveBg then
+                        saveBg:SetColorTexture(1, 1, 1, 0.9)
+                        saveLbl:SetText(EllesmereUI.L("Saved"))
+                        C_Timer.After(0.4, function()
+                            saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85)
+                            saveLbl:SetText(EllesmereUI.L("Save"))
+                        end)
+                    end
+                    _committing = false
                 end
 
                 box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
@@ -5140,7 +5158,11 @@ local function BuildCogPopup(opts)
                     self:ClearFocus()
                     self:SetText(row.get and row.get() or "")
                 end)
-                saveBtn:SetScript("OnClick", function() ApplyInput() end)
+                if commitOnBlur then
+                    box:SetScript("OnEditFocusLost", function() ApplyInput() end)
+                else
+                    saveBtn:SetScript("OnClick", function() ApplyInput() end)
+                end
 
                 -- Disabled overlay for input
                 local inputDis
