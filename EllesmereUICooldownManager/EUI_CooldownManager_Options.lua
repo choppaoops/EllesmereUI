@@ -8,6 +8,7 @@ local ADDON_NAME, ns = ...
 local PAGE_BAR_GLOWS    = "Bar Glows"
 local PAGE_BUFF_BARS    = "Tracking Bars"
 local PAGE_CDM_BARS     = "CDM Bars"
+local PAGE_GLOW_STYLES  = "Glow Styles"
 
 local PAGE_UNLOCK       = "Unlock Mode"
 
@@ -19175,12 +19176,153 @@ initFrame:SetScript("OnEvent", function(self)
 
 
     ---------------------------------------------------------------------------
+    --  Glow Styles page: one profile-level set of per-type appearance detail
+    --  params (Pixel / Auto-Cast / Button / Shape). A master toggle gates the
+    --  whole thing (default off = current appearance). Each CDM glow keeps its
+    --  own style + colour; when the toggle is on it inherits these details for
+    --  whichever of the four types it renders. Preview state lives on `ns` to
+    --  avoid adding main-closure locals.
+    ---------------------------------------------------------------------------
+    local function BuildGlowStylesPage(pageName, parent, yOffset)
+        local W = EllesmereUI.Widgets
+        local y = yOffset
+        local _, h
+        local ACCENT = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local DEF = ns.GLOW_STYLE_DEFAULTS or {}
+        local TYPE_TO_IDX = { pixel = 1, shape = 2, button = 3, autocast = 4 }
+
+        local function GS() return ns.GetGlowStyles() end
+        local function get(typeKey, k)
+            local t = ns.GetGlowStyleType and select(1, ns.GetGlowStyleType(typeKey, false))
+            local v = t and t[k]
+            if v == nil then v = DEF[typeKey] and DEF[typeKey][k] end
+            return v
+        end
+        local function setv(typeKey, k, v)
+            local t = ns.GetGlowStyleType and select(1, ns.GetGlowStyleType(typeKey, true))
+            if t then t[k] = v end
+        end
+
+        -- Stop the previous preview overlay before rebuilding the page.
+        if ns._glowStylePreviewOv then ns.StopNativeGlow(ns._glowStylePreviewOv) end
+        if not ns._glowStyleEditType then ns._glowStyleEditType = "pixel" end
+
+        local function RefreshPreview()
+            local ov = ns._glowStylePreviewOv
+            if not ov then return end
+            ns._glowStylePreviewForce = true
+            ns.StopNativeGlow(ov)
+            ns.StartNativeGlow(ov, TYPE_TO_IDX[ns._glowStyleEditType] or 1, ACCENT.r, ACCENT.g, ACCENT.b)
+            ns._glowStylePreviewForce = false
+        end
+        local function ApplyGlow()
+            if ns.BuildAllCDMBars then ns.BuildAllCDMBars() end
+            if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+            RefreshPreview()
+        end
+
+        _, h = W:SectionHeader(parent, "SHARED GLOW STYLES", y);  y = y - h
+        _, h = W:Toggle(parent, "Use Custom Glow Styles", y,
+            function() local gs = GS(); return gs and gs.useCustom == true end,
+            function(v) local gs = GS(); if gs then gs.useCustom = v and true or false end; ApplyGlow() end,
+            "When on, every CDM glow of a customized type uses the detail settings below. Each glow still picks its own style and colour. Off = the game's default glow appearance (nothing changes).")
+        y = y - h
+
+        -- Sample-icon live preview.
+        do
+            local host = CreateFrame("Frame", nil, parent)
+            host:SetSize(parent:GetWidth() - 40, 60)
+            host:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, y)
+            local iconFrame = CreateFrame("Frame", nil, host)
+            iconFrame:SetSize(44, 44)
+            iconFrame:SetPoint("CENTER", host, "CENTER", 0, 0)
+            local tex = iconFrame:CreateTexture(nil, "ARTWORK")
+            tex:SetAllPoints()
+            tex:SetTexture("Interface\\Icons\\Spell_Nature_StarFall")
+            tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local ov = CreateFrame("Frame", nil, iconFrame)
+            ov:SetAllPoints()
+            ns._glowStylePreviewOv = ov
+            y = y - 66
+            C_Timer.After(0, RefreshPreview)
+        end
+
+        local PV_VALUES = { pixel = "Pixel Glow", autocast = "Auto-Cast Shine",
+            button = "Action Button Glow", shape = "Shape Glow" }
+        local PV_ORDER  = { "pixel", "autocast", "button", "shape" }
+        _, h = W:Dropdown(parent, "Preview", y, PV_VALUES,
+            function() return ns._glowStyleEditType or "pixel" end,
+            function(v) ns._glowStyleEditType = v; RefreshPreview() end, PV_ORDER,
+            "Which glow type the sample icon above previews.")
+        y = y - h
+
+        -- ---- Pixel Glow ----
+        _, h = W:SectionHeader(parent, "PIXEL GLOW", y);  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Lines", min=2, max=16, step=1,
+              getValue=function() return get("pixel","lines") end,
+              setValue=function(v) setv("pixel","lines",v); ApplyGlow() end },
+            { type="slider", text="Thickness", min=1, max=5, step=1,
+              getValue=function() return get("pixel","thickness") end,
+              setValue=function(v) setv("pixel","thickness",v); ApplyGlow() end });  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Speed", min=1, max=8, step=1,
+              getValue=function() return 9 - (get("pixel","speed") or 4) end,
+              setValue=function(v) setv("pixel","speed", 9 - v); ApplyGlow() end },
+            { type="toggle", text="Border",
+              getValue=function() return get("pixel","border") == true end,
+              setValue=function(v) setv("pixel","border", v and true or false); ApplyGlow() end });  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="colorpicker", text="Border Color",
+              getValue=function() return get("pixel","borderR") or 0, get("pixel","borderG") or 0, get("pixel","borderB") or 0 end,
+              setValue=function(r,g,b) setv("pixel","borderR",r); setv("pixel","borderG",g); setv("pixel","borderB",b); ApplyGlow() end,
+              disabled=function() return get("pixel","border") ~= true end,
+              disabledTooltip=EllesmereUI.DisabledTooltip("Border") },
+            { type="spacer" });  y = y - h
+
+        -- ---- Auto-Cast Shine ----
+        _, h = W:SectionHeader(parent, "AUTO-CAST SHINE", y);  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Particles", min=2, max=8, step=1,
+              getValue=function() return get("autocast","particles") end,
+              setValue=function(v) setv("autocast","particles",v); ApplyGlow() end },
+            { type="slider", text="Speed", min=1, max=6, step=1,
+              getValue=function() return 7 - (get("autocast","frequency") or 2) end,
+              setValue=function(v) setv("autocast","frequency", 7 - v); ApplyGlow() end });  y = y - h
+        _, h = W:Slider(parent, "Scale", y, 0.5, 2.0, 0.1,
+            function() return get("autocast","scale") end,
+            function(v) setv("autocast","scale",v); ApplyGlow() end)
+        y = y - h
+
+        -- ---- Action Button Glow ----
+        _, h = W:SectionHeader(parent, "ACTION BUTTON GLOW", y);  y = y - h
+        _, h = W:Slider(parent, "Speed", y, 0.5, 3.0, 0.1,
+            function() return get("button","frequency") end,
+            function(v) setv("button","frequency",v); ApplyGlow() end,
+            "Marching-ants speed. 1.0 is the default.")
+        y = y - h
+
+        -- ---- Shape Glow ----
+        _, h = W:SectionHeader(parent, "SHAPE GLOW", y);  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Pulse Speed", min=2, max=20, step=1,
+              getValue=function() return get("shape","speed") end,
+              setValue=function(v) setv("shape","speed",v); ApplyGlow() end },
+            { type="slider", text="Extend", min=0, max=30, step=1,
+              getValue=function() return math.floor((get("shape","extend") or 0.10) * 100 + 0.5) end,
+              setValue=function(v) setv("shape","extend", v / 100); ApplyGlow() end });  y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+        return yOffset - y
+    end
+
+    ---------------------------------------------------------------------------
     --  Register the module
     ---------------------------------------------------------------------------
     EllesmereUI:RegisterModule("EllesmereUICooldownManager", {
         title       = "Cooldown Manager",
         description = "CDM bar customization, action bar glows, and buff bars.",
-        pages       = { PAGE_CDM_BARS, PAGE_BAR_GLOWS, PAGE_BUFF_BARS },
+        pages       = { PAGE_CDM_BARS, PAGE_BAR_GLOWS, PAGE_GLOW_STYLES, PAGE_BUFF_BARS },
         disabledPages = {},
         disabledPageTooltips = {},
         buildPage   = function(pageName, parent, yOffset)
@@ -19205,6 +19347,8 @@ initFrame:SetScript("OnEvent", function(self)
                     return BuildCDMBarsPage(pageName, parent, yOffset)
                 elseif pageName == PAGE_BAR_GLOWS then
                     return BuildBarGlowsPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_GLOW_STYLES then
+                    return BuildGlowStylesPage(pageName, parent, yOffset)
                 end
                 return
             end
@@ -19232,6 +19376,8 @@ initFrame:SetScript("OnEvent", function(self)
                 return h2
             elseif pageName == PAGE_BAR_GLOWS then
                 return BuildBarGlowsPage(pageName, parent, yOffset)
+            elseif pageName == PAGE_GLOW_STYLES then
+                return BuildGlowStylesPage(pageName, parent, yOffset)
             elseif pageName == PAGE_BUFF_BARS then
                 return BuildBuffBarsPage(pageName, parent, yOffset)
             end

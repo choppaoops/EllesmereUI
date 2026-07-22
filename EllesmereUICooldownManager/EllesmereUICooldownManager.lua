@@ -2108,6 +2108,92 @@ local GLOW_STYLES = {
 ns.GLOW_STYLES = GLOW_STYLES
 
 -------------------------------------------------------------------------------
+--  Shared Glow Styles
+--
+--  A single, profile-level set of appearance detail params -- one group per
+--  parameter-rich glow type (Pixel / Auto-Cast / Action Button / Shape). Every
+--  CDM glow apply point (Active State, Pandemic, Buff, CD-Ready, Max-Stacks,
+--  Bar Glows) keeps choosing its own style + colour; when the master toggle is
+--  ON, the DETAIL params for whichever of these four types it renders are read
+--  from here instead of the per-bar / hard-coded values. When OFF, resolution
+--  returns nil and StartNativeGlow keeps its exact previous behaviour, so an
+--  un-opted profile is byte-identical to before.
+--
+--  Defaults reproduce the current on-screen appearance so flipping the toggle
+--  on (without touching any slider) changes nothing.
+--
+--  Style index -> type key: 1 Pixel, 2 Shape, 3 Button, 4 Auto-Cast; the three
+--  FlipBook styles (GCD / Modern / Classic) have no tunable params and map to
+--  nil (their glows always use engine defaults).
+-------------------------------------------------------------------------------
+-- Wrapped in a do-block so the two lookup tables are scoped upvalues of the
+-- resolver closures below rather than main-chunk locals (the file sits at
+-- Lua 5.1's 200 main-chunk local ceiling).
+do
+local GLOW_STYLE_TYPE_OF = { [1] = "pixel", [2] = "shape", [3] = "button", [4] = "autocast" }
+
+local GLOW_STYLE_DEFAULTS = {
+    pixel    = { lines = 8, thickness = 2, speed = 4, border = false,
+                 borderR = 0, borderG = 0, borderB = 0 },
+    autocast = { scale = 1.0, particles = 4, frequency = 2 },
+    button   = { frequency = 1.0 },
+    shape    = { speed = 10, extend = 0.10 },
+}
+ns.GLOW_STYLE_TYPE_OF = GLOW_STYLE_TYPE_OF
+ns.GLOW_STYLE_DEFAULTS = GLOW_STYLE_DEFAULTS
+
+-- Profile-level store, lazily seeded. Master toggle OFF by default (opt-in).
+function ns.GetGlowStyles()
+    local p = ECME and ECME.db and ECME.db.profile
+    if not p then return nil end
+    local gs = p.glowStyles
+    if not gs then gs = { useCustom = false }; p.glowStyles = gs end
+    return gs
+end
+
+-- Read one type's params merged over defaults (per-key fallback so a partially
+-- populated store never returns a nil knob). `create` seeds the sub-table.
+function ns.GetGlowStyleType(typeKey, create)
+    local def = GLOW_STYLE_DEFAULTS[typeKey]
+    if not def then return nil end
+    local gs = ns.GetGlowStyles()
+    local t = gs and gs[typeKey]
+    if not t and create and gs then t = {}; gs[typeKey] = t end
+    return t, def
+end
+
+-- Resolve a style index to an engine-opts table, or nil when the shared system
+-- is off / the style has no tunable params. Callers pass the returned opts
+-- straight to StartNativeGlow (which already accepts an opts table for Pixel;
+-- the other types read their keys in the injection below).
+function ns.GetGlowStyleParams(styleIdx)
+    local gs = ns.GetGlowStyles()
+    -- _glowStylePreviewForce lets the options-page sample icon reflect the
+    -- sliders even before the master toggle is switched on.
+    if not gs or (not gs.useCustom and not ns._glowStylePreviewForce) then return nil end
+    local typeKey = GLOW_STYLE_TYPE_OF[tonumber(styleIdx) or 0]
+    if not typeKey then return nil end
+    local t, def = ns.GetGlowStyleType(typeKey)
+    t = t or {}
+    local function v(k) local x = t[k]; if x == nil then return def[k] end return x end
+    if typeKey == "pixel" then
+        local opts = { N = v("lines"), th = v("thickness"), period = v("speed") }
+        if v("border") then
+            opts.bg = { r = v("borderR"), g = v("borderG"), b = v("borderB"), a = 1 }
+        end
+        return opts, typeKey
+    elseif typeKey == "autocast" then
+        return { scale = v("scale"), particles = v("particles"), frequency = v("frequency") }, typeKey
+    elseif typeKey == "button" then
+        return { frequency = v("frequency") }, typeKey
+    elseif typeKey == "shape" then
+        return { speed = v("speed"), extendMul = v("extend") }, typeKey
+    end
+    return nil
+end
+end  -- shared glow styles do-block
+
+-------------------------------------------------------------------------------
 --  Cross-surface Pandemic Glow sync (CDM bars + Nameplates) -- BEST EFFORT
 --  Glow styles are identified by NAME, never by raw index: CDM, Nameplates and
 --  the shared engine order their lists differently, so the same integer means a
@@ -2330,6 +2416,13 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
     if noColor then cr, cg, cb = 1.0, 0.788, 0.137 end
     cr = cr or 1; cg = cg or 1; cb = cb or 1
 
+    -- Shared Glow Styles: when the master toggle is ON, the detail params for
+    -- this style's type come from the profile-level store (ns.GetGlowStyleParams
+    -- returns the type-shaped table). When OFF it returns nil and every branch
+    -- below keeps its exact previous inputs -- byte-identical for un-opted
+    -- profiles. Colour + which style is chosen are still per apply point.
+    local sharedOpts = ns.GetGlowStyleParams and ns.GetGlowStyleParams(styleIdx)
+
     if entry.shapeGlow then
         -- CDM-specific: read shape mask/border from the icon frame
         local icon = parent
@@ -2351,17 +2444,19 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
             maskPath   = maskPath,
             borderPath = borderPath,
             shapeMask  = shapeMask,
+            speed      = sharedOpts and sharedOpts.speed,
+            extendMul  = sharedOpts and sharedOpts.extendMul,
         })
     elseif entry.procedural then
-        -- Pixel Glow params. The pandemic glow passes explicit opts; per-button
-        -- glows (active-state, CD-ready, bar glows) pass none, so resolve the
-        -- owning CD/utility bar's Pixel Glow settings. Falls back to defaults for
-        -- action-bar overlays and bars that never set the values.
+        -- Pixel Glow params. Priority: shared style (opt-in) > pandemic's explicit
+        -- opts > the owning CD/utility bar's Pixel Glow settings > defaults (used
+        -- by action-bar overlays and bars that never set the values).
         local N, th, period, bgR, bgG, bgB, bgA
-        if opts then
-            N = opts.N or 8; th = opts.th or 2; period = opts.period or 4
-            if opts.bg then
-                bgR, bgG, bgB, bgA = opts.bg.r or 0, opts.bg.g or 0, opts.bg.b or 0, opts.bg.a or 1
+        local px = sharedOpts or opts
+        if px then
+            N = px.N or 8; th = px.th or 2; period = px.period or 4
+            if px.bg then
+                bgR, bgG, bgB, bgA = px.bg.r or 0, px.bg.g or 0, px.bg.b or 0, px.bg.a or 1
             end
         else
             local pfc = _ecmeFC[parent]
@@ -2378,9 +2473,11 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
         if lineLen < 1 then lineLen = 1 end
         _G_Glows.StartProceduralAnts(overlay, N, th, period, lineLen, cr, cg, cb, pW, pH, bgR, bgG, bgB, bgA)
     elseif entry.buttonGlow then
-        _G_Glows.StartButtonGlow(overlay, pW, cr, cg, cb, nil, pH)
+        _G_Glows.StartButtonGlow(overlay, pW, cr, cg, cb, nil, pH, sharedOpts and sharedOpts.frequency)
     elseif entry.autocast then
-        _G_Glows.StartAutoCastShine(overlay, pW, cr, cg, cb, 1.0, pH)
+        _G_Glows.StartAutoCastShine(overlay, pW, cr, cg, cb,
+            (sharedOpts and sharedOpts.scale) or 1.0, pH,
+            sharedOpts and sharedOpts.particles, sharedOpts and sharedOpts.frequency)
     else
         if noColor then cr, cg, cb = nil, nil, nil end
         _G_Glows.StartFlipBookGlow(overlay, pW, entry, cr, cg, cb, pH)

@@ -388,7 +388,10 @@ end
 -- global's framerate-dependent quirks. ANTS_FRAME_TIME (seconds per cell) is the
 -- single knob for the speed. State lives on our own ants texture.
 local ANTS_FRAME_TIME = 0.017  -- ~59 cells/sec -> ~0.37s per 22-frame loop
-local function _AnimateTexCoords(tex, sheetW, sheetH, cellW, cellH, numFrames, elapsed)
+-- frameTime is an optional per-call override (CDM shared Button-glow frequency);
+-- nil keeps the default march speed, so every existing caller is unaffected.
+local function _AnimateTexCoords(tex, sheetW, sheetH, cellW, cellH, numFrames, elapsed, frameTime)
+    frameTime = frameTime or ANTS_FRAME_TIME
     if not tex._euiAnimCols then
         tex._euiAnimCols  = floor(sheetW / cellW)
         tex._euiAnimColW  = cellW / sheetW
@@ -397,10 +400,10 @@ local function _AnimateTexCoords(tex, sheetW, sheetH, cellW, cellH, numFrames, e
         tex._euiAnimAccum = 0
     end
     tex._euiAnimAccum = tex._euiAnimAccum + elapsed
-    if tex._euiAnimAccum < ANTS_FRAME_TIME then return end
+    if tex._euiAnimAccum < frameTime then return end
 
-    local advance = floor(tex._euiAnimAccum / ANTS_FRAME_TIME)
-    tex._euiAnimAccum = tex._euiAnimAccum - advance * ANTS_FRAME_TIME
+    local advance = floor(tex._euiAnimAccum / frameTime)
+    tex._euiAnimAccum = tex._euiAnimAccum - advance * frameTime
     local frame = (tex._euiAnimFrame + advance) % numFrames
     tex._euiAnimFrame = frame
 
@@ -415,10 +418,13 @@ end
 local function _ButtonGlowOnUpdate(self, elapsed)
     local d = self._euiBgData
     if not d then return end
-    _AnimateTexCoords(d.ants, 256, 256, 48, 48, 22, elapsed)
+    _AnimateTexCoords(d.ants, 256, 256, 48, 48, 22, elapsed, d.frameTime)
 end
 
-local function StartButtonGlow(wrapper, szOrW, cr, cg, cb, scale, szH)
+-- frequency (optional): march-speed multiplier. 1.0 (or nil) = default speed;
+-- 2.0 = twice as fast. Used by the CDM shared Button glow style; every other
+-- caller omits it and keeps the exact previous speed.
+local function StartButtonGlow(wrapper, szOrW, cr, cg, cb, scale, szH, frequency)
     scale = scale or 1.0
     local w = szOrW or 36
     local h = szH or w
@@ -435,6 +441,7 @@ local function StartButtonGlow(wrapper, szOrW, cr, cg, cb, scale, szH)
         wrapper._euiBgData = { glow = glow, ants = ants }
     end
     local d = wrapper._euiBgData
+    d.frameTime = frequency and frequency > 0 and (ANTS_FRAME_TIME / frequency) or nil
     -- The ants texture has transparent padding baked into its frames,
     -- so we scale up to compensate and match the button edge visually.
     local antsW, antsH = w * 1.35, h * 1.35
@@ -527,9 +534,12 @@ local function _AutoCastOnUpdate(self, elapsed)
     end
 end
 
-local function StartAutoCastShine(wrapper, szOrW, cr, cg, cb, scale, szH)
+-- particles / frequency (optional): dots per orbit layer and base orbit period.
+-- nil keeps the originals (4 dots, period 2) so every existing caller is
+-- unchanged; the CDM shared Auto-Cast style passes both.
+local function StartAutoCastShine(wrapper, szOrW, cr, cg, cb, scale, szH, particles, frequency)
     scale = scale or 1.0
-    local dotsPerLayer = 4
+    local dotsPerLayer = (particles and particles > 0) and floor(particles) or 4
     local totalDots = dotsPerLayer * 4
     if not wrapper._euiAcData then
         wrapper._euiAcData = {
@@ -541,6 +551,7 @@ local function StartAutoCastShine(wrapper, szOrW, cr, cg, cb, scale, szH)
         }
     end
     local d = wrapper._euiAcData
+    d.period = (frequency and frequency > 0) and frequency or 2
     d.dotsPerLayer = dotsPerLayer
     d.layerPhase[1] = 0; d.layerPhase[2] = 0.25; d.layerPhase[3] = 0.5; d.layerPhase[4] = 0.75
     for idx = 1, totalDots do
@@ -612,9 +623,13 @@ local function StartShapeGlow(wrapper, sz, cr, cg, cb, scale, opts)
     end
     local d = wrapper._euiSgData
     d.timer = 0
+    -- opts.speed / opts.extendMul (optional): pulse rate and edge overshoot.
+    -- nil keeps the originals (speed 10, extend 0.10) so all existing callers
+    -- are unchanged; the CDM shared Shape style passes both.
+    d.speed = (opts.speed and opts.speed > 0) and opts.speed or 10.0
 
     -- Glow extends slightly past the button edge for the pulsing effect
-    local extend = sz * 0.10
+    local extend = sz * (opts.extendMul or 0.10)
     d.glow:ClearAllPoints()
     d.glow:SetPoint("TOPLEFT",     btn, "TOPLEFT",     -extend,  extend)
     d.glow:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  extend, -extend)
