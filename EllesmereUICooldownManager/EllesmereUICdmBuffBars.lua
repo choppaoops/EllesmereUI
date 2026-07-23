@@ -1474,6 +1474,7 @@ local TBB_STYLE_KEYS = {
     "borderTextureShiftX", "borderTextureShiftY", "borderBehind",
     "pandemicGlow", "pandemicGlowStyle", "pandemicGlowColor",
     "pandemicGlowLines", "pandemicGlowThickness", "pandemicGlowSpeed",
+    "displayMode", "circleSize", "circleBackground", "circleTimerY",
 }
 ns.TBB_STYLE_KEYS = TBB_STYLE_KEYS
 
@@ -1841,6 +1842,34 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bar:SetValue(0.65)
     bar:SetClipsChildren(true)
     wrapFrame._bar = bar
+
+    -- Circle (ring) display mirror. bar._bar is the single fill source of truth
+    -- for every update path (self-timed, cooldown, charge, mirror, stacks), so
+    -- one pair of hooks drives the ring for all of them -- no per-path edits.
+    -- Active only while this bar is in circle mode (wrapFrame._circleActive); in
+    -- bar mode both hooks return immediately, so the StatusBar path is untouched.
+    -- Secret-value safe (12.1): a secret fill value/range/colour is skipped,
+    -- leaving the ring at its last drawn state instead of tainting on arithmetic.
+    hooksecurefunc(bar, "SetMinMaxValues", function(self, mn, mx)
+        self._cMin, self._cMax = mn, mx
+    end)
+    hooksecurefunc(bar, "SetValue", function(self, v)
+        if not wrapFrame._circleActive then return end
+        local c = wrapFrame._circle
+        if not c then return end
+        local mn, mx = self._cMin or 0, self._cMax or 1
+        if issecretvalue and (issecretvalue(v) or issecretvalue(mn) or issecretvalue(mx)) then return end
+        local range = mx - mn
+        c:SetProgress(range > 0 and (v - mn) / range or 0)
+        -- Mirror the bar's live fill colour so the ring matches auto / custom /
+        -- threshold colouring without duplicating that resolution.
+        local ft = wrapFrame._cFillTex
+        if not ft then ft = self:GetStatusBarTexture(); wrapFrame._cFillTex = ft end
+        if ft then
+            local r, g, b = ft:GetVertexColor()
+            if r and not (issecretvalue and issecretvalue(r)) then c:SetColor(r, g, b) end
+        end
+    end)
 
     local bg = bar:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
@@ -2645,6 +2674,89 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     ApplyTBBTickMarks(sb, cfg, bar._threshTicks, isVert, bar._tickOverlay)
     ApplyTBBChargeHashLines(bar, cfg, GetTBBMaxCharges(cfg))
     bar._ticksDirty = true
+
+    -- Circle (ring) display: run last so it overrides the bar-mode geometry the
+    -- code above just applied. In bar mode it only ensures the ring is hidden
+    -- and the StatusBar shown, so the bar path stays exactly as before.
+    ns.ApplyTBBCircleMode(bar, cfg)
+end
+
+-- Switch a tracked bar between the horizontal StatusBar and the ring display.
+-- Bar mode (default) is a no-op beyond hiding a previously-shown ring and
+-- re-showing the StatusBar. Circle mode makes the wrap square, hides the bar
+-- and its border, centres the icon, and centres the timer over it; the ring's
+-- progress + colour are driven live by the SetValue hook installed on the bar.
+function ns.ApplyTBBCircleMode(bar, cfg)
+    if not bar or not cfg then return end
+    local sb = bar._bar
+    if cfg.displayMode ~= "circle" then
+        if bar._circleActive then
+            bar._circleActive = false
+            if bar._circle then bar._circle:Hide() end
+            if sb then sb:Show() end
+        end
+        return
+    end
+
+    local snap = (EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.Snap) or function(v) return v end
+    local size = snap(cfg.circleSize or 50)
+    if size < 16 then size = 16 end
+
+    if not bar._circle then bar._circle = ns.CreateTBBCircle(bar) end
+    local c = bar._circle
+    bar._circleActive = true
+
+    bar:SetSize(size, size)
+    c:ClearAllPoints()
+    c:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    c:SetCircleSize(size)
+    c:SetBackgroundShown(cfg.circleBackground ~= false)
+    c:Show()
+
+    -- Push the bar's CURRENT fill to the ring now. The SetValue hook only fires
+    -- on future updates, so a freshly-activated (or preview) ring would stay
+    -- empty for a tick without this. Secret-value safe.
+    if sb then
+        local mn, mx = sb:GetMinMaxValues()
+        local v = sb:GetValue()
+        if not (issecretvalue and (issecretvalue(v) or issecretvalue(mn) or issecretvalue(mx))) then
+            local range = mx - mn
+            c:SetProgress(range > 0 and (v - mn) / range or 0)
+            local ft = sb:GetStatusBarTexture()
+            bar._cFillTex = ft
+            if ft then
+                local r, g, b = ft:GetVertexColor()
+                if r and not (issecretvalue and issecretvalue(r)) then c:SetColor(r, g, b) end
+            end
+        end
+    end
+
+    -- Hide the horizontal bar (its children -- bg, spark, thresholds, ticks --
+    -- hide with it) and the border container.
+    if sb then sb:Hide() end
+    if bar._barBorder then bar._barBorder:Hide() end
+
+    -- Icon centred inside the ring.
+    if bar._icon then
+        if (cfg.iconDisplay or "none") ~= "none" then
+            local iSz = math.floor(size * 0.52)
+            bar._icon:SetSize(iSz, iSz)
+            bar._icon:ClearAllPoints()
+            bar._icon:SetPoint("CENTER", bar, "CENTER", 0, 0)
+            bar._icon:Show()
+        else
+            bar._icon:Hide()
+        end
+    end
+
+    -- Timer centred over the icon; name hidden (rings are compact). Stacks keep
+    -- whatever corner the bar-mode apply chose, anchored to the square wrap.
+    if bar._timerText then
+        bar._timerText:ClearAllPoints()
+        bar._timerText:SetPoint("CENTER", bar, "CENTER", 0, snap(cfg.circleTimerY or 0))
+        bar._timerText:SetJustifyH("CENTER")
+    end
+    if bar._nameText then bar._nameText:Hide() end
 end
 
 -- Exposed for the options popout preview: preview bars are constructed and

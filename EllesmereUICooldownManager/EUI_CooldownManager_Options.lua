@@ -4760,6 +4760,43 @@ initFrame:SetScript("OnEvent", function(self)
         local layoutHeader
         layoutHeader, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
 
+        -- Display Mode (Bar / Circle) | Circle Size (circle only)
+        local circleOff = function() local bd = SelectedTBB(); return not bd or bd.displayMode ~= "circle" end
+        local dmRow
+        dmRow, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Display Mode",
+              values = { bar = "Bar", circle = "Circle (Ring)" }, order = { "bar", "circle" },
+              tooltip = "Bar shows the remaining duration as a horizontal fill. Circle sweeps it around a ring with the icon in the center.",
+              getValue = function() local bd = SelectedTBB(); return (bd and bd.displayMode) or "bar" end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.displayMode = (v == "circle") and "circle" or nil
+                  ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "slider", text = "Circle Size", min = 20, max = 200, step = 1,
+              disabled = circleOff, disabledTooltip = "Display Mode: Circle (Ring)",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.circleSize or 50 end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.circleSize = v
+                  ns.BuildTrackedBuffBars()
+              end });  y = y - h
+
+        -- Ring Background (circle only)
+        local ringBgRow
+        ringBgRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Ring Background",
+              tooltip = "Show a dim full ring behind the progress arc.",
+              disabled = circleOff, disabledTooltip = "Display Mode: Circle (Ring)",
+              getValue = function() local bd = SelectedTBB(); return not bd or bd.circleBackground ~= false end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.circleBackground = v and nil or false
+                  ns.BuildTrackedBuffBars()
+              end },
+            { type = "spacer" });  y = y - h
+
         -- Height | Width
         -- The whole group shares one width/height, so a grouped member inherits
         -- the group ANCHOR's match-lock: if the anchor is size-matched, every
