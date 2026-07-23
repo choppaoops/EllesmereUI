@@ -1402,6 +1402,7 @@ do
         end
 
         statsText:SetText(txt)
+        statsFrame:SetSize(statsText:GetStringWidth() + 2, statsText:GetStringHeight() + 2)
     end
 
     local function ApplySecondaryStats()
