@@ -1474,7 +1474,7 @@ local TBB_STYLE_KEYS = {
     "borderTextureShiftX", "borderTextureShiftY", "borderBehind",
     "pandemicGlow", "pandemicGlowStyle", "pandemicGlowColor",
     "pandemicGlowLines", "pandemicGlowThickness", "pandemicGlowSpeed",
-    "displayMode", "circleSize", "circleBackground", "circleTimerY",
+    "displayMode", "circleSize", "circleThickness", "circleBackground", "circleTimerY",
 }
 ns.TBB_STYLE_KEYS = TBB_STYLE_KEYS
 
@@ -2710,6 +2710,7 @@ function ns.ApplyTBBCircleMode(bar, cfg)
     c:ClearAllPoints()
     c:SetPoint("CENTER", bar, "CENTER", 0, 0)
     c:SetCircleSize(size)
+    c:SetThickness(snap(cfg.circleThickness or 4))
     c:SetBackgroundShown(cfg.circleBackground ~= false)
     c:Show()
 

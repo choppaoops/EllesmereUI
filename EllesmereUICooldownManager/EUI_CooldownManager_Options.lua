@@ -4783,9 +4783,17 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildTrackedBuffBars()
               end });  y = y - h
 
-        -- Ring Background (circle only)
+        -- Ring Thickness | Ring Background (circle only)
         local ringBgRow
         ringBgRow, h = W:DualRow(parent, y,
+            { type = "slider", text = "Ring Thickness", min = 1, max = 20, step = 1,
+              disabled = circleOff, disabledTooltip = "Display Mode: Circle (Ring)",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.circleThickness or 4 end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.circleThickness = v
+                  ns.BuildTrackedBuffBars()
+              end },
             { type = "toggle", text = "Ring Background",
               tooltip = "Show a dim full ring behind the progress arc.",
               disabled = circleOff, disabledTooltip = "Display Mode: Circle (Ring)",
@@ -4794,8 +4802,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.circleBackground = v and nil or false
                   ns.BuildTrackedBuffBars()
-              end },
-            { type = "spacer" });  y = y - h
+              end });  y = y - h
 
         -- Height | Width
         -- The whole group shares one width/height, so a grouped member inherits
