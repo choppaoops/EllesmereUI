@@ -2108,12 +2108,21 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     local groupDisplayName = (ns.TBBGroupName and ns.TBBGroupName(gid))
                         or (EllesmereUI.L("GROUP") .. " " .. gid)
                     hLbl:SetText(groupDisplayName)
+                    local tagAfter = hLbl
                     if gkey then
                         local gTag = item:CreateFontString(nil, "OVERLAY")
                         gTag:SetFont(FONT_PATH, 9, GetCDMOptOutline())
                         gTag:SetTextColor(ar, ag, ab, 0.9)
                         gTag:SetPoint("LEFT", hLbl, "RIGHT", 6, 0)
                         gTag:SetText(EllesmereUI.L("GLOBAL"))
+                        tagAfter = gTag
+                    end
+                    if ns.TBBGroupIsRings and ns.TBBGroupIsRings(gid) then
+                        local rTag = item:CreateFontString(nil, "OVERLAY")
+                        rTag:SetFont(FONT_PATH, 9, GetCDMOptOutline())
+                        rTag:SetTextColor(ar, ag, ab, 0.9)
+                        rTag:SetPoint("LEFT", tagAfter, "RIGHT", 6, 0)
+                        rTag:SetText(EllesmereUI.L("RINGS"))
                     end
                     local eLbl = item:CreateFontString(nil, "OVERLAY")
                     eLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
@@ -3086,39 +3095,51 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             parent._showRowDivider = true
             parent._tbbClickTargets = nil
 
+            -- A group displayed as rings lays out by RING LAYOUT instead of Grow
+            -- Direction / Bar Spacing.
+            local ringGroup = ns.TBBGroupIsRings and ns.TBBGroupIsRings(gid)
+            if ringGroup and ns.CDMO_BuildTBRRingLayout then
+                y = ns.CDMO_BuildTBRRingLayout(W, parent, y, gid, RefreshTBB)
+            end
+
             hdr, h = W:SectionHeader(parent, "GROUP SETTINGS", y);  y = y - h
             -- The group's mover: a global group's TBBG_ element, else its anchor
             -- bar's (nil while no member is enabled: the click then does nothing).
-            EllesmereUI.BuildSectionUnlockJump(hdr, { key = function()
-                local gk = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
-                if gk then return "TBBG_" .. gk end
-                local ai = ns.TBBGroupAnchorIndex(gid)
-                return ai and ("TBB_" .. ai) or nil
-            end })
+            -- A ring group's mover sits on RING LAYOUT.
+            if not ringGroup then
+                EllesmereUI.BuildSectionUnlockJump(hdr, { key = function()
+                    local gk = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
+                    if gk then return "TBBG_" .. gk end
+                    local ai = ns.TBBGroupAnchorIndex(gid)
+                    return ai and ("TBB_" .. ai) or nil
+                end })
+            end
 
             -- Grow Direction | Bar Spacing
-            _, h = W:DualRow(parent, y,
-                { type = "dropdown", text = "Grow Direction",
-                  values = { DOWN = "Down", UP = "Up", LEFT = "Left", RIGHT = "Right" },
-                  order = { "DOWN", "UP", "LEFT", "RIGHT" },
-                  getValue = function() return ns.TBBGroupGrow(gid) end,
-                  setValue = function(v)
-                      ns.TBBSetGroupGrow(gid, v)
-                      ns.BuildTrackedBuffBars()
-                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
-                      RefreshTBBPopout()
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type = "slider", pixel = true, text = "Bar Spacing", min = -2, max = 20, step = 1,
-                  getValue = function() return ns.TBBGroupSpacing(gid) end,
-                  setValue = function(v)
-                      ns.TBBSetGroupSpacing(gid, v)
-                      ns.BuildTrackedBuffBars()
-                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
-                      RefreshTBBPopout()
-                      EllesmereUI:RefreshPage()
-                  end }
-            );  y = y - h
+            if not ringGroup then
+                _, h = W:DualRow(parent, y,
+                    { type = "dropdown", text = "Grow Direction",
+                      values = { DOWN = "Down", UP = "Up", LEFT = "Left", RIGHT = "Right" },
+                      order = { "DOWN", "UP", "LEFT", "RIGHT" },
+                      getValue = function() return ns.TBBGroupGrow(gid) end,
+                      setValue = function(v)
+                          ns.TBBSetGroupGrow(gid, v)
+                          ns.BuildTrackedBuffBars()
+                          -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                          RefreshTBBPopout()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type = "slider", pixel = true, text = "Bar Spacing", min = -2, max = 20, step = 1,
+                      getValue = function() return ns.TBBGroupSpacing(gid) end,
+                      setValue = function(v)
+                          ns.TBBSetGroupSpacing(gid, v)
+                          ns.BuildTrackedBuffBars()
+                          -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                          RefreshTBBPopout()
+                          EllesmereUI:RefreshPage()
+                      end }
+                );  y = y - h
+            end
 
             -- Group Name (blank = the default "Group N" label) | Auto-Add
             _, h = W:DualRow(parent, y,
@@ -3169,8 +3190,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   end },
                 { type = "dropdown", text = "Shift Elements If No Bars",
                   tooltip = "When the current spec has no bars in this group, keeps elements anchored to the group in place and shifts them up or down by one bar height (tune with the cog's Extra Y Offset) to cover its empty slot.",
-                  disabled = function() return GlobalEntry() == nil end,
-                  disabledTooltip = "Global Group",
+                  disabled = function() return ringGroup or GlobalEntry() == nil end,
+                  disabledTooltip = ringGroup and "Rings keep their centre, so there is no empty slot to cover."
+                      or "Global Group",
+                  rawTooltip = ringGroup or nil,
                   values = { None = "None", Up = "Up", Down = "Down" },
                   order = { "None", "Up", "Down" },
                   getValue = function()
@@ -3190,8 +3213,8 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   end }
             );  y = y - h
             -- Inline reposition cog on the shift dropdown: Extra Y Offset
-            -- (ResourceBars "Shift Elements if No Resource" parity).
-            if not EllesmereUI._prebuilding then
+            -- (ResourceBars "Shift Elements if No Resource" parity). None for rings.
+            if not EllesmereUI._prebuilding and not ringGroup then
                 local rgn = shiftRow._rightRegion
                 EllesmereUI.BuildInlineCog(rgn, {
                     title = "Shift Offset",
@@ -3219,6 +3242,40 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     },
                 })
             end
+
+            -- Display As | blank: the group draws its bars as bars or as concentric
+            -- rings. A global group's choice is shared, so it asks first.
+            local function SetGroupDisplay(v)
+                ns.TBBSetGroupDisplay(gid, v == "rings")
+                ns.BuildTrackedBuffBars()
+                RefreshTBBPopout()
+                EllesmereUI:RefreshPage(true)
+            end
+            _, h = W:DualRow(parent, y,
+                { type = "dropdown", text = "Display As",
+                  tooltip = "Rings draw this group's bars as concentric rings round one centre. Presets and cooldown bars stay bars.",
+                  values = { bars = "Bars", rings = "Rings" },
+                  order = { "bars", "rings" },
+                  getValue = function() return ns.TBBGroupIsRings(gid) and "rings" or "bars" end,
+                  setValue = function(v)
+                      if (v == "rings") == ns.TBBGroupIsRings(gid) then return end
+                      if not (ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)) then
+                          SetGroupDisplay(v)
+                          return
+                      end
+                      EllesmereUI:ShowConfirmPopup({
+                          title = "Global Group",
+                          message = (v == "rings")
+                              and "This group is shared by every spec. It will display as rings on all of them."
+                              or "This group is shared by every spec. It will display as bars on all of them.",
+                          confirmText = "Change",
+                          cancelText = "Cancel",
+                          onConfirm = function() SetGroupDisplay(v) end,
+                          onCancel = function() EllesmereUI:RefreshPage() end,
+                      })
+                  end },
+                EllesmereUI.BlankRowCfg()
+            );  y = y - h
 
             -- Ensure bar frames exist before showing placeholders
             ns.BuildTrackedBuffBars()
@@ -3266,6 +3323,18 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
 
         parent._showRowDivider = true
 
+        -- A bar in a group displayed as rings: controls a ring cannot use stay on
+        -- the page, disabled; rows that only size or skin a bar are left out.
+        local ringMode = ns.TBBIsRing and ns.TBBIsRing(SelectedTBB()) or false
+        local function RingOff(cfg, why)
+            if ringMode and cfg then
+                cfg.disabled = function() return true end
+                cfg.disabledTooltip = why
+                cfg.rawTooltip = true
+            end
+            return cfg
+        end
+
         -------------------------------------------------------------------
         --  BAR LAYOUT
         -------------------------------------------------------------------
@@ -3273,10 +3342,13 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         layoutHeader, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
         -- The selected bar's mover; a grouped bar's is its group's (a global
         -- group's TBBG_ element, else the group anchor's), since only the anchor
-        -- keeps a mover.
+        -- keeps a mover. A ring's is its ring group's.
         EllesmereUI.BuildSectionUnlockJump(layoutHeader, { key = function()
             local bd = SelectedTBB()
             local gid = bd and ns.TBBBarGroupID(bd) or 0
+            if gid ~= 0 and ns.TBBIsRing(bd) and ns.TBRMoverKey then
+                return ns.TBRMoverKey(gid)
+            end
             if gid ~= 0 then
                 local gk = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
                 if gk then return "TBBG_" .. gk end
@@ -3286,180 +3358,190 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             return "TBB_" .. _tbbSelectedBar
         end })
 
-        -- Height | Width. The whole group shares one width/height, so a grouped member
-        -- inherits the group ANCHOR's match-lock: if size-matched, every member's slider
-        -- is disabled (match wins) instead of silently fighting it.
-        local tbbKey = "TBB_" .. _tbbSelectedBar
-        do
-            local selBd = SelectedTBB()
-            local selGid = selBd and ns.TBBBarGroupID(selBd) or 0
-            if selGid ~= 0 then
-                local ai = ns.TBBGroupAnchorIndex(selGid)
-                if ai then tbbKey = "TBB_" .. ai end
+        -- Size and texture rows: a ring takes its size from the group.
+        if not ringMode then
+            -- Height | Width. The whole group shares one width/height, so a grouped member
+            -- inherits the group ANCHOR's match-lock: if size-matched, every member's slider
+            -- is disabled (match wins) instead of silently fighting it.
+            local tbbKey = "TBB_" .. _tbbSelectedBar
+            do
+                local selBd = SelectedTBB()
+                local selGid = selBd and ns.TBBBarGroupID(selBd) or 0
+                if selGid ~= 0 then
+                    local ai = ns.TBBGroupAnchorIndex(selGid)
+                    if ai then tbbKey = "TBB_" .. ai end
+                end
             end
-        end
-        local thDis, thTip, thRaw = EllesmereUI.MatchGuard(tbbKey, "Height")
-        local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
-        -- Width is the THICKNESS of a vertical bar (toggle swaps stored dimensions), so its
-        -- floor drops to 1 there -- a 50px floor would clamp a slim vertical bar the moment the slider is touched.
-        local selIsVert
-        do
-            local sb0 = SelectedTBB()
-            selIsVert = sb0 and sb0.verticalOrientation and true or false
-        end
-        local hwRow
-        hwRow, h = W:DualRow(parent, y,
-            { type = "slider", text = "Height",
-              min = 1, max = 800, step = 1,
-              disabled = thDis, disabledTooltip = thTip, rawTooltip = thRaw,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.height or 24 end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.height = v
-                  -- Grouped bars share height: write the rest of the group too.
-                  local gid = ns.TBBBarGroupID(bd)
-                  if gid ~= 0 then
-                      local t = ns.GetTrackedBuffBars()
-                      for _, b in ipairs(t.bars or {}) do
-                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.height = v end
-                      end
-                  end
-                  ns.BuildTrackedBuffBars()
-                  -- BuildTrackedBuffBars() only rebuilds the LIVE bar pool; the
-                  -- preview wraps in the popout are separate frames. RefreshPage()
-                  -- takes the fast widget-refresh path here, so the page builder
-                  -- tail that repaints the popout never re-runs. Repaint it
-                  -- directly or the preview keeps the old geometry.
-                  RefreshTBBPopout()
-                  EllesmereUI:RefreshPage()
-              end },
-            { type = "slider", text = "Width",
-              min = 1, max = 800, step = 1,
-              disabled = twDis, disabledTooltip = twTip, rawTooltip = twRaw,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.width or 270 end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.width = v
-                  -- Grouped bars share width: write the rest of the group too.
-                  local gid = ns.TBBBarGroupID(bd)
-                  if gid ~= 0 then
-                      local t = ns.GetTrackedBuffBars()
-                      for _, b in ipairs(t.bars or {}) do
-                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.width = v end
-                      end
-                  end
-                  ns.BuildTrackedBuffBars()
-                  -- Preview popout: RefreshPage() takes the fast path, repaint it here.
-                  RefreshTBBPopout()
-                  EllesmereUI:RefreshPage()
-              end }
-        );  y = y - h
-
-        -- Sync icons: Apply Height/Width to all bars of the SAME orientation -- "height" is
-        -- the short side of a horizontal bar but the LONG side of a vertical one, so cross-orientation copies would be nonsense.
-        if EllesmereUI.BuildSyncIcon then
-            local function SameOrientation(a, b)
-                return (a.verticalOrientation and true or false) == (b.verticalOrientation and true or false)
+            local thDis, thTip, thRaw = EllesmereUI.MatchGuard(tbbKey, "Height")
+            local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
+            -- Width is the THICKNESS of a vertical bar (toggle swaps stored dimensions), so its
+            -- floor drops to 1 there -- a 50px floor would clamp a slim vertical bar the moment the slider is touched.
+            local selIsVert
+            do
+                local sb0 = SelectedTBB()
+                selIsVert = sb0 and sb0.verticalOrientation and true or false
             end
-            local orientWord = selIsVert and "Vertical" or "Horizontal"
-            EllesmereUI.BuildSyncIcon({
-                region = hwRow._leftRegion,
-                tooltip = "Apply Height to all " .. orientWord .. " Bars",
-                isSynced = function()
-                    local bd = SelectedTBB(); if not bd then return false end
-                    local val = bd.height or 24
-                    local t = ns.GetTrackedBuffBars()
-                    for _, b in ipairs(t.bars or {}) do
-                        if SameOrientation(bd, b) and (b.height or 24) ~= val then return false end
-                    end
-                    return true
-                end,
-                onClick = function()
-                    local bd = SelectedTBB(); if not bd then return end
-                    local val = bd.height or 24
-                    local t = ns.GetTrackedBuffBars()
-                    for _, b in ipairs(t.bars or {}) do
-                        if SameOrientation(bd, b) then b.height = val end
-                    end
-                    RefreshTBB(); EllesmereUI:RefreshPage()
-                end,
-            })
-            EllesmereUI.BuildSyncIcon({
-                region = hwRow._rightRegion,
-                tooltip = "Apply Width to all " .. orientWord .. " Bars",
-                isSynced = function()
-                    local bd = SelectedTBB(); if not bd then return false end
-                    local val = bd.width or 270
-                    local t = ns.GetTrackedBuffBars()
-                    for _, b in ipairs(t.bars or {}) do
-                        if SameOrientation(bd, b) and (b.width or 270) ~= val then return false end
-                    end
-                    return true
-                end,
-                onClick = function()
-                    local bd = SelectedTBB(); if not bd then return end
-                    local val = bd.width or 270
-                    local t = ns.GetTrackedBuffBars()
-                    for _, b in ipairs(t.bars or {}) do
-                        if SameOrientation(bd, b) then b.width = val end
-                    end
-                    RefreshTBB(); EllesmereUI:RefreshPage()
-                end,
-            })
-        end
-
-        -- Vertical Orientation | Bar Texture
-        _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Vertical Orientation",
-              tooltip = "Vertical bars fill upward; flipping a grouped bar flips its whole group.",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.verticalOrientation end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  -- Swap width/height so visual dimensions stay correct
-                  local function flip(c)
-                      c.width, c.height = (c.height or 24), (c.width or 270)
-                      c.verticalOrientation = v
-                  end
-                  flip(bd)
-                  -- Groups stay orientation-uniform: shared width/height only makes sense
-                  -- when every member reads dimensions the same way, so the whole group flips together.
-                  local gid = ns.TBBBarGroupID(bd)
-                  if gid ~= 0 then
-                      local t = ns.GetTrackedBuffBars()
-                      for _, b in ipairs(t.bars or {}) do
-                          if b ~= bd and ns.TBBBarGroupID(b) == gid
-                             and (b.verticalOrientation and true or false) ~= (v and true or false) then
-                              flip(b)
+            local hwRow
+            hwRow, h = W:DualRow(parent, y,
+                { type = "slider", text = "Height",
+                  min = 1, max = 800, step = 1,
+                  disabled = thDis, disabledTooltip = thTip, rawTooltip = thRaw,
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.height or 24 end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.height = v
+                      -- Grouped bars share height: write the rest of the group too.
+                      local gid = ns.TBBBarGroupID(bd)
+                      if gid ~= 0 then
+                          local t = ns.GetTrackedBuffBars()
+                          for _, b in ipairs(t.bars or {}) do
+                              if b ~= bd and ns.TBBBarGroupID(b) == gid then b.height = v end
                           end
                       end
-                      -- Rotate the grow direction so side-by-side stays side-by-side across the flip (DOWN<->RIGHT, UP<->LEFT).
-                      local rot = v and { DOWN = "RIGHT", UP = "LEFT" }
-                                    or { RIGHT = "DOWN", LEFT = "UP" }
-                      local grow = ns.TBBGroupGrow(gid)
-                      if rot[grow] then ns.TBBSetGroupGrow(gid, rot[grow]) end
-                  end
-                  RefreshTBB()
-                  -- Full rebuild: the Width slider's floor and sync tooltips are orientation-dependent.
-                  EllesmereUI:RefreshPage(true)
-              end },
-            GateBlizzardOnly("cdmbars", { type = "dropdown", text = "Bar Texture",
-              values = texValues, order = texOrder,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.texture or "none" end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.texture = v; RefreshTBB()
-              end })
-        );  y = y - h
+                      ns.BuildTrackedBuffBars()
+                      -- BuildTrackedBuffBars() only rebuilds the LIVE bar pool; the
+                      -- preview wraps in the popout are separate frames. RefreshPage()
+                      -- takes the fast widget-refresh path here, so the page builder
+                      -- tail that repaints the popout never re-runs. Repaint it
+                      -- directly or the preview keeps the old geometry.
+                      RefreshTBBPopout()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type = "slider", text = "Width",
+                  min = 1, max = 800, step = 1,
+                  disabled = twDis, disabledTooltip = twTip, rawTooltip = twRaw,
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.width or 270 end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.width = v
+                      -- Grouped bars share width: write the rest of the group too.
+                      local gid = ns.TBBBarGroupID(bd)
+                      if gid ~= 0 then
+                          local t = ns.GetTrackedBuffBars()
+                          for _, b in ipairs(t.bars or {}) do
+                              if b ~= bd and ns.TBBBarGroupID(b) == gid then b.width = v end
+                          end
+                      end
+                      ns.BuildTrackedBuffBars()
+                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                      RefreshTBBPopout()
+                      EllesmereUI:RefreshPage()
+                  end }
+            );  y = y - h
+
+            -- Sync icons: Apply Height/Width to all bars of the SAME orientation -- "height" is
+            -- the short side of a horizontal bar but the LONG side of a vertical one, so cross-orientation copies would be nonsense.
+            if EllesmereUI.BuildSyncIcon then
+                local function SameOrientation(a, b)
+                    return (a.verticalOrientation and true or false) == (b.verticalOrientation and true or false)
+                end
+                local orientWord = selIsVert and "Vertical" or "Horizontal"
+                EllesmereUI.BuildSyncIcon({
+                    region = hwRow._leftRegion,
+                    tooltip = "Apply Height to all " .. orientWord .. " Bars",
+                    isSynced = function()
+                        local bd = SelectedTBB(); if not bd then return false end
+                        local val = bd.height or 24
+                        local t = ns.GetTrackedBuffBars()
+                        for _, b in ipairs(t.bars or {}) do
+                            if SameOrientation(bd, b) and (b.height or 24) ~= val then return false end
+                        end
+                        return true
+                    end,
+                    onClick = function()
+                        local bd = SelectedTBB(); if not bd then return end
+                        local val = bd.height or 24
+                        local t = ns.GetTrackedBuffBars()
+                        for _, b in ipairs(t.bars or {}) do
+                            if SameOrientation(bd, b) then b.height = val end
+                        end
+                        RefreshTBB(); EllesmereUI:RefreshPage()
+                    end,
+                })
+                EllesmereUI.BuildSyncIcon({
+                    region = hwRow._rightRegion,
+                    tooltip = "Apply Width to all " .. orientWord .. " Bars",
+                    isSynced = function()
+                        local bd = SelectedTBB(); if not bd then return false end
+                        local val = bd.width or 270
+                        local t = ns.GetTrackedBuffBars()
+                        for _, b in ipairs(t.bars or {}) do
+                            if SameOrientation(bd, b) and (b.width or 270) ~= val then return false end
+                        end
+                        return true
+                    end,
+                    onClick = function()
+                        local bd = SelectedTBB(); if not bd then return end
+                        local val = bd.width or 270
+                        local t = ns.GetTrackedBuffBars()
+                        for _, b in ipairs(t.bars or {}) do
+                            if SameOrientation(bd, b) then b.width = val end
+                        end
+                        RefreshTBB(); EllesmereUI:RefreshPage()
+                    end,
+                })
+            end
+
+            -- Vertical Orientation | Bar Texture
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Vertical Orientation",
+                  tooltip = "Vertical bars fill upward; flipping a grouped bar flips its whole group.",
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.verticalOrientation end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      -- Swap width/height so visual dimensions stay correct
+                      local function flip(c)
+                          c.width, c.height = (c.height or 24), (c.width or 270)
+                          c.verticalOrientation = v
+                      end
+                      flip(bd)
+                      -- Groups stay orientation-uniform: shared width/height only makes sense
+                      -- when every member reads dimensions the same way, so the whole group flips together.
+                      local gid = ns.TBBBarGroupID(bd)
+                      if gid ~= 0 then
+                          local t = ns.GetTrackedBuffBars()
+                          for _, b in ipairs(t.bars or {}) do
+                              if b ~= bd and ns.TBBBarGroupID(b) == gid
+                                 and (b.verticalOrientation and true or false) ~= (v and true or false) then
+                                  flip(b)
+                              end
+                          end
+                          -- Rotate the grow direction so side-by-side stays side-by-side across the flip (DOWN<->RIGHT, UP<->LEFT).
+                          local rot = v and { DOWN = "RIGHT", UP = "LEFT" }
+                                        or { RIGHT = "DOWN", LEFT = "UP" }
+                          local grow = ns.TBBGroupGrow(gid)
+                          if rot[grow] then ns.TBBSetGroupGrow(gid, rot[grow]) end
+                      end
+                      RefreshTBB()
+                      -- Full rebuild: the Width slider's floor and sync tooltips are orientation-dependent.
+                      EllesmereUI:RefreshPage(true)
+                  end },
+                GateBlizzardOnly("cdmbars", { type = "dropdown", text = "Bar Texture",
+                  values = texValues, order = texOrder,
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.texture or "none" end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.texture = v; RefreshTBB()
+                  end })
+            );  y = y - h
+        end
 
         -- Name Text (dropdown + cog) | Duration Text (dropdown + cog)
         local TBB_POS_VALUES = { none = "None", center = "Center", top = "Top", bottom = "Bottom", left = "Left", right = "Right" }
         local TBB_POS_ORDER = { "none", "center", "top", "bottom", "left", "right" }
+        -- Rings: Center is the ring centre; Bottom / Left / Right sit outside the
+        -- outermost ring at 6 / 9 / 3 o'clock.
+        if ringMode then
+            TBB_POS_VALUES = { none = "None", center = "Center", bottom = "Bottom", left = "Left", right = "Right" }
+            TBB_POS_ORDER = { "none", "center", "bottom", "left", "right" }
+        end
 
         -- When a text element claims a position, evict any other text already there so
         -- labels never overlap. Compares EFFECTIVE (rendered) positions: name text never
         -- renders on vertical bars, so its stored slot must not evict anything there.
         local function EvictTBBTextConflicts(bd, changedKey, newPos)
-            if newPos == "none" then return end
+            -- A ring lines up the texts that share a position in one row.
+            if newPos == "none" or ringMode then return end
             local function resolvePos(key)
                 if key == "namePosition" and bd.verticalOrientation then return "none" end
                 local v = bd[key]
@@ -3560,7 +3642,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
               values = TBB_POS_VALUES, order = TBB_POS_ORDER,
               disabled = function()
                   local bd = SelectedTBB()
-                  return bd and bd.verticalOrientation and true or false
+                  return not ringMode and bd and bd.verticalOrientation and true or false
               end,
               disabledTooltip = "Horizontal Orientation (name text is not shown on vertical bars)",
               getValue = function()
@@ -4056,7 +4138,8 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
               } },
             -- Show Icon moved up into the slot the Visibility Options dropdown left behind.
             { type = "dropdown", text = "Show Icon",
-              values = { none = "None", left = "Left (Top)", right = "Right (Bottom)" },
+              values = ringMode and { none = "None", left = "Left", right = "Right" }
+                  or { none = "None", left = "Left (Top)", right = "Right (Bottom)" },
               order = { "none", "left", "right" },
               getValue = function() local bd = SelectedTBB(); return bd and bd.iconDisplay or "none" end,
               setValue = function(v)
@@ -4094,7 +4177,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -- Fill Color (dropdown: auto/custom + gradient mode + 2 inline swatches) | Show Spark
         local fillRow
         fillRow, h = W:DualRow(parent, y,
-            EllesmereUI.BlizzStyle.Gate("cdmbars", { type = "dropdown", text = "Fill Color",
+            EllesmereUI.BlizzStyle.Gate("cdmbars", RingOff({ type = "dropdown", text = "Fill Color",
               values = {
                   none = "Custom Color",
                   VERTICAL = "Vertical Gradient",
@@ -4117,13 +4200,13 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                       bd.gradientDir = v
                   end
                   RefreshTBB(); EllesmereUI:RefreshPage()
-              end }),
-            { type = "toggle", text = "Show Spark",
+              end }, "A ring is one solid colour: use the swatch.")),
+            RingOff({ type = "toggle", text = "Show Spark",
               getValue = function() local bd = SelectedTBB(); return bd and bd.showSpark end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.showSpark = v; RefreshTBB()
-              end }
+              end }, "A ring has no spark.")
         );  y = y - h
         -- Inline swatches on Fill Color dropdown: fill color + gradient end color
         do
@@ -4190,7 +4273,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 local bd = SelectedTBB()
                 local isAuto = false
                 -- Blizzard Style keeps the flat atlas fill, so the gradient end colour is inert there.
-                local noGrad = not bd or not bd.gradientEnabled or EllesmereUI.BlizzStyle.Get("cdmbars")
+                local noGrad = ringMode or not bd or not bd.gradientEnabled or EllesmereUI.BlizzStyle.Get("cdmbars")
                 -- Fill swatch: disabled in auto mode
                 if isAuto then fillSwatch:SetAlpha(0.3); fillBlock:Show()
                 else fillSwatch:SetAlpha(1); fillBlock:Hide() end
@@ -4206,8 +4289,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         do
             local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
             local tbbBsRow
+            local NO_BORDER = "A ring has no border."
             tbbBsRow, h = W:DualRow(parent, y,
-                EllesmereUI.BlizzStyle.Gate("cdmbars", { type="dropdown", text="Border Texture",
+                EllesmereUI.BlizzStyle.Gate("cdmbars", RingOff({ type="dropdown", text="Border Texture",
                   values=texValues, order=texOrder,
                   getValue=function() local bd = SelectedTBB(); return bd and bd.borderTexture or "solid" end,
                   setValue=function(v)
@@ -4220,9 +4304,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                       if defSz then bd.borderSize = defSz end
                       if bd.borderSizePx then bd.borderSizePx = false end
                       RefreshTBB(); EllesmereUI:RefreshPage(true)
-                  end }),
+                  end }, NO_BORDER)),
                 -- Classic WoW UI: the slot sizes the vanilla frame instead.
-                (EllesmereUI.BlizzStyle.Active("cdmbars") == "classic") and EllesmereUI.BlizzStyle.ClassicBorderSizeCfg(
+                RingOff((EllesmereUI.BlizzStyle.Active("cdmbars") == "classic") and EllesmereUI.BlizzStyle.ClassicBorderSizeCfg(
                     function() local bd = SelectedTBB(); return bd and bd.stockBorderScale end,
                     function(v)
                         local bd = SelectedTBB(); if not bd then return end
@@ -4235,14 +4319,14 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   getPx = function() local bd = SelectedTBB(); return bd and bd.borderSizePx end,
                   setPx = function(v) local bd = SelectedTBB(); if bd then bd.borderSizePx = v end end,
                   apply = function() RefreshTBB() end,
-                })));  y = y - h
+                })), NO_BORDER));  y = y - h
             -- Width Offset | Height Offset: the textured border's outward offsets,
             -- present only while a textured style is selected (built on the
-            -- prebuild pass too, so the y advance is identical).
+            -- prebuild pass too, so the y advance is identical). Never for rings.
             do
                 local bd0 = SelectedTBB()
                 local tex0 = bd0 and bd0.borderTexture or "solid"
-                if tex0 ~= "" and tex0 ~= "solid" then
+                if not ringMode and tex0 ~= "" and tex0 ~= "solid" then
                     local ocfgL, ocfgR = EllesmereUI.BorderOffsetRowCfgs({
                         addonKey = "resourcebars",
                         getTex = function() local bd = SelectedTBB(); return bd and bd.borderTexture or "solid" end,
@@ -4262,7 +4346,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             end
             -- Inline border color swatch on Border Size (right region); none
             -- under Classic WoW UI, whose slider sizes the vanilla frame.
-            if EllesmereUI.BlizzStyle.Active("cdmbars") ~= "classic" then
+            if not ringMode and EllesmereUI.BlizzStyle.Active("cdmbars") ~= "classic" then
                 local rgn = tbbBsRow._rightRegion
                 local ctrl = rgn._control
                 local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
@@ -4280,7 +4364,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
                 EllesmereUI.BlizzStyle.BlockInline("cdmbars", borderSwatch)
             end
-            do
+            if not ringMode then
                 local rgn = tbbBsRow._leftRegion
                 local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
                     icon = EllesmereUI.DIRECTIONS_ICON,
@@ -4332,296 +4416,299 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             end
         end
 
-        -----------------------------------------------------------------------
-        --  EXTRAS
-        -----------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
+        -- EXTRAS are bar effects (pandemic glow, stack fill, thresholds): none for rings.
+        if not ringMode then
+            -----------------------------------------------------------------------
+            --  EXTRAS
+            -----------------------------------------------------------------------
+            _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
-        -- Row 1: Pandemic Glow (dropdown + swatch + cog + sync) | Stack Based
-        -- Bar (buff bars only; page rebuilds on selection change, so cd/utility
-        -- bars get a blank slot). Stack Based Bar is inert until Max Stacks is
-        -- enabled below.
-        do
-            -- Shared glow controls over the bar's pandemic keys (the Glows page's
-            -- Tracked Buff Bar descriptor, resolving the selected bar).
-            local GO = EllesmereUI.GlowOptions
-            local tbbDesc = ns._CDM_TbbGlowDesc(SelectedTBB, function() RefreshTBB() end)
+            -- Row 1: Pandemic Glow (dropdown + swatch + cog + sync) | Stack Based
+            -- Bar (buff bars only; page rebuilds on selection change, so cd/utility
+            -- bars get a blank slot). Stack Based Bar is inert until Max Stacks is
+            -- enabled below.
+            do
+                -- Shared glow controls over the bar's pandemic keys (the Glows page's
+                -- Tracked Buff Bar descriptor, resolving the selected bar).
+                local GO = EllesmereUI.GlowOptions
+                local tbbDesc = ns._CDM_TbbGlowDesc(SelectedTBB, function() RefreshTBB() end)
 
-            local bd0 = SelectedTBB()
-            local rightSlot
-            if bd0 and bd0.trackType ~= "cooldown" then
-                rightSlot = { type = "toggle", text = "Stack Based Bar",
-                    tooltip = "Fill this bar from current stacks out of Max Stacks instead of remaining time (requires Enable Max Stacks below).",
-                    getValue = function() local bd = SelectedTBB(); return bd and bd.stackBasedBar end,
-                    setValue = function(v)
-                        local bd = SelectedTBB(); if not bd then return end
-                        bd.stackBasedBar = v and true or false; RefreshTBB()
-                    end }
-            else
-                rightSlot = { type = "label", text = "" }
-            end
-
-            local tbbPanRow
-            tbbPanRow, h = W:DualRow(parent, y, GO.DropdownSpec(tbbDesc, "Pandemic Glow",
-                "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)"), rightSlot);  y = y - h
-            GO.AttachInline(tbbPanRow._leftRegion, tbbDesc)
-
-            -- Apply All
-            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
-                EllesmereUI.BuildSyncIcon({
-                    region = tbbPanRow._leftRegion,
-                    tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
-                    isSynced = function()
-                        local src = SelectedTBB(); if not src then return true end
-                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                    end,
-                    onClick = function()
-                        local src = SelectedTBB(); if not src then return end
-                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                        RefreshTBB()
-                    end,
-                })
-            end
-        end
-
-        -- Row 2: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
-        local function maxStacksOff()
-            local bd = SelectedTBB()
-            return not bd or not bd.stackThresholdMaxEnabled
-        end
-        local maxStacksRow
-        maxStacksRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Enable Max Stacks",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.stackThresholdMaxEnabled end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.stackThresholdMaxEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
-              end },
-            { type = "label", text = "Ticks at Stacks",
-              tooltip = "Comma separated stack counts to put a tick mark at. Type all to mark every stack." }
-        );  y = y - h
-        -- Inline slider on Enable Max Stacks toggle (same as inline swatch positioning)
-        do
-            local rgn = maxStacksRow._leftRegion
-            local ctrl = rgn._control
-            local SL = EllesmereUI.SL or {}
-            local trackFrame, valBox, _, slThumb = EllesmereUI.BuildSliderCore(
-                rgn, 90, 4, 14, 36, 26, 13, SL.INPUT_A or 0.6,
-                1, 100, 1,
-                function() local bd = SelectedTBB(); return bd and bd.stackThresholdMax or 10 end,
-                function(v) local bd = SelectedTBB(); if bd then bd.stackThresholdMax = v; RefreshTBB() end end,
-                true)
-            PP.Point(valBox, "RIGHT", ctrl, "LEFT", -6, 0)
-            PP.Point(trackFrame, "RIGHT", valBox, "LEFT", -8, 0)
-            -- Disable block
-            local block = CreateFrame("Frame", nil, trackFrame)
-            block:SetPoint("TOPLEFT", trackFrame, "TOPLEFT", -4, 4)
-            block:SetPoint("BOTTOMRIGHT", valBox, "BOTTOMRIGHT", 4, -4)
-            block:SetFrameLevel(trackFrame:GetFrameLevel() + 10)
-            block:EnableMouse(true)
-            block:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(trackFrame, EllesmereUI.DisabledTooltip("Max Stacks"))
-            end)
-            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateMaxSliderState()
-                local off = maxStacksOff()
-                trackFrame:SetAlpha(off and 0.3 or 1)
-                valBox:SetAlpha(off and 0.3 or 1)
-                valBox:EnableMouse(not off)
-                if slThumb then slThumb._sliderDisabled = off end
-                if off then block:Show() else block:Hide() end
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateMaxSliderState)
-            UpdateMaxSliderState()
-        end
-        -- Add "(Ex: 1,5,8)" suffix in smaller, dimmer text
-        do
-            local ticksLabel = maxStacksRow._rightRegion and maxStacksRow._rightRegion._label
-            if ticksLabel then
-                local suffix = maxStacksRow._rightRegion:CreateFontString(nil, "OVERLAY")
-                suffix:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
-                suffix:SetTextColor(1, 1, 1, 0.35)
-                suffix:SetPoint("LEFT", ticksLabel, "RIGHT", 5, 0)
-                suffix:SetText(EllesmereUI.L("(Ex: 1,5,8)"))
-            end
-        end
-        -- Inline input on Ticks at Stacks (matches slider value box style)
-        do
-            local rgn = maxStacksRow._rightRegion
-            local SIDE_PAD = 20
-            local FONT = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
-            local INPUT_W = 70
-            local INPUT_H = 26
-
-            local box = CreateFrame("EditBox", nil, rgn)
-            PP.Size(box, INPUT_W, INPUT_H)
-            PP.Point(box, "RIGHT", rgn, "RIGHT", -SIDE_PAD, 0)
-            box:SetFrameLevel(rgn:GetFrameLevel() + 2)
-            box:SetAutoFocus(false)
-            box:SetJustifyH("CENTER")
-            box:SetFont(FONT, 13, "")
-            box:SetTextColor(
-                EllesmereUI.TEXT_DIM_R or 0.75,
-                EllesmereUI.TEXT_DIM_G or 0.75,
-                EllesmereUI.TEXT_DIM_B or 0.75,
-                EllesmereUI.TEXT_DIM_A or 1)
-            -- Background matching slider input box
-            local bg = box:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetColorTexture(
-                EllesmereUI.SL_INPUT_R or 0.08,
-                EllesmereUI.SL_INPUT_G or 0.08,
-                EllesmereUI.SL_INPUT_B or 0.08,
-                (EllesmereUI.SL_INPUT_A or 0.5) + (EllesmereUI.MW_INPUT_ALPHA_BOOST or 0.15))
-            -- Border matching slider input box
-            if PP.CreateBorder then
-                PP.CreateBorder(box,
-                    EllesmereUI.BORDER_R or 0.15,
-                    EllesmereUI.BORDER_G or 0.15,
-                    EllesmereUI.BORDER_B or 0.15,
-                    EllesmereUI.SL_INPUT_BRD_A or 0.4, 1)
-            end
-
-            box:SetScript("OnEnterPressed", function(self)
-                self:ClearFocus()
-                local bd = SelectedTBB(); if bd then
-                    bd.stackThresholdTicks = self:GetText(); RefreshTBB()
+                local bd0 = SelectedTBB()
+                local rightSlot
+                if bd0 and bd0.trackType ~= "cooldown" then
+                    rightSlot = { type = "toggle", text = "Stack Based Bar",
+                        tooltip = "Fill this bar from current stacks out of Max Stacks instead of remaining time (requires Enable Max Stacks below).",
+                        getValue = function() local bd = SelectedTBB(); return bd and bd.stackBasedBar end,
+                        setValue = function(v)
+                            local bd = SelectedTBB(); if not bd then return end
+                            bd.stackBasedBar = v and true or false; RefreshTBB()
+                        end }
+                else
+                    rightSlot = { type = "label", text = "" }
                 end
-            end)
-            box:SetScript("OnEscapePressed", function(self)
-                self:ClearFocus()
-                local bd = SelectedTBB()
-                self:SetText(bd and bd.stackThresholdTicks or "")
-            end)
 
-            -- Inline swatch for tick mark color (left of the input box)
-            local tickSwatch, updateTickSwatch = EllesmereUI.BuildColorSwatch(
-                rgn, box:GetFrameLevel() + 1,
-                function()
-                    local bd = SelectedTBB()
-                    if not bd then return 1, 1, 1, 1 end
-                    local a = bd.stackThresholdTickA
-                    if a == nil then a = 1 end
-                    return bd.stackThresholdTickR or 1, bd.stackThresholdTickG or 1,
-                           bd.stackThresholdTickB or 1, a
-                end,
-                function(r, g, b, a)
-                    local bd = SelectedTBB(); if not bd then return end
-                    bd.stackThresholdTickR, bd.stackThresholdTickG = r, g
-                    bd.stackThresholdTickB, bd.stackThresholdTickA = b, a; RefreshTBB()
-                end,
-                true, 20)
-            PP.Point(tickSwatch, "RIGHT", box, "LEFT", -8, 0)
-            local tickBlock = CreateFrame("Frame", nil, tickSwatch)
-            tickBlock:SetAllPoints(); tickBlock:SetFrameLevel(tickSwatch:GetFrameLevel() + 10)
-            tickBlock:EnableMouse(true)
-            tickBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(tickSwatch, EllesmereUI.DisabledTooltip("Max Stacks"))
-            end)
-            tickBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local tbbPanRow
+                tbbPanRow, h = W:DualRow(parent, y, GO.DropdownSpec(tbbDesc, "Pandemic Glow",
+                    "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)"), rightSlot);  y = y - h
+                GO.AttachInline(tbbPanRow._leftRegion, tbbDesc)
 
-            local function UpdateTicksInput()
-                local bd = SelectedTBB()
-                box:SetText(bd and bd.stackThresholdTicks or "")
-                local off = maxStacksOff()
-                box:SetAlpha(off and 0.3 or 1)
-                box:EnableMouse(not off)
-                if off then tickSwatch:SetAlpha(0.3); tickBlock:Show()
-                else tickSwatch:SetAlpha(1); tickBlock:Hide() end
-                if updateTickSwatch then updateTickSwatch() end
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateTicksInput)
-            UpdateTicksInput()
-        end
-
-        -- Row 3: Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
-        local threshRow
-        threshRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Enable Stack Threshold",
-              tooltip = "This will change the color of your bar if you have more than your chosen number of stacks",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.stackThresholdEnabled end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.stackThresholdEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
-              end },
-            { type = "slider", text = "Stack Threshold",
-              min = 0, max = 100, step = 1,
-              disabled = function()
-                  local bd = SelectedTBB()
-                  if not bd or not bd.stackThresholdEnabled then return true end
-                  return bd.stackThresholdMulti and true or false
-              end,
-              disabledTooltip = function()
-                  local bd = SelectedTBB()
-                  if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
-                      return StackThreshReplacesTip()
-                  end
-                  return EllesmereUI.DisabledTooltip("Stack Threshold")
-              end,
-              rawTooltip = true,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.stackThreshold or 5 end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.stackThreshold = v; RefreshTBB()
-              end }
-        );  y = y - h
-        -- Inline swatch on Enable Stack Threshold toggle
-        do
-            local rgn = threshRow._leftRegion
-            local ctrl = rgn._control
-            local threshSwatch, updateThreshSwatch = EllesmereUI.BuildColorSwatch(
-                rgn, threshRow:GetFrameLevel() + 3,
-                function()
-                    local bd = SelectedTBB()
-                    if not bd then return 0.8, 0.1, 0.1, 1 end
-                    return bd.stackThresholdR or 0.8, bd.stackThresholdG or 0.1, bd.stackThresholdB or 0.1, bd.stackThresholdA or 1
-                end,
-                function(r, g, b, a)
-                    local bd = SelectedTBB(); if not bd then return end
-                    bd.stackThresholdR, bd.stackThresholdG, bd.stackThresholdB, bd.stackThresholdA = r, g, b, a; RefreshTBB()
-                end,
-                true, 20)
-            PP.Point(threshSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            local threshBlock = CreateFrame("Frame", nil, threshSwatch)
-            threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
-            threshBlock:EnableMouse(true)
-            threshBlock:SetScript("OnEnter", function()
-                local bd = SelectedTBB()
-                if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
-                    EllesmereUI.ShowWidgetTooltip(threshSwatch, StackThreshReplacesTip())
-                    return
-                end
-                EllesmereUI.ShowWidgetTooltip(threshSwatch, EllesmereUI.DisabledTooltip("Stack Threshold"))
-            end)
-            threshBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Cog: opens the multi-threshold editor. Stays usable while multi is
-            -- on, since it is the only way back out of it.
-            EllesmereUI.BuildInlineCog(rgn, {
-                anchorTo = threshSwatch,
-                show = function(self)
-                    ShowStackThreshEditor({
-                        getCfg    = SelectedTBB,
-                        refreshFn = RefreshTBB,
-                        anchor    = self,
+                -- Apply All
+                if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
+                    EllesmereUI.BuildSyncIcon({
+                        region = tbbPanRow._leftRegion,
+                        tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
+                        isSynced = function()
+                            local src = SelectedTBB(); if not src then return true end
+                            return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                        end,
+                        onClick = function()
+                            local src = SelectedTBB(); if not src then return end
+                            EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                            RefreshTBB()
+                        end,
                     })
-                end,
-                tip = StackThreshHelpTip(),
-                disabled = function() local bd = SelectedTBB(); return not (bd and bd.stackThresholdEnabled) end,
-                disabledTooltip = "Stack Threshold",
-            })
-
-            local function UpdateThreshSwatchState()
-                local bd = SelectedTBB()
-                local enabled = bd and bd.stackThresholdEnabled
-                -- The swatch edits the single threshold color, so multi masks it
-                -- the same way it masks the slider.
-                local off = not enabled or (bd.stackThresholdMulti and true or false)
-                if off then threshSwatch:SetAlpha(0.3); threshBlock:Show()
-                else threshSwatch:SetAlpha(1); threshBlock:Hide() end
+                end
             end
-            EllesmereUI.RegisterWidgetRefresh(function() updateThreshSwatch(); UpdateThreshSwatchState() end)
-            UpdateThreshSwatchState()
+
+            -- Row 2: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
+            local function maxStacksOff()
+                local bd = SelectedTBB()
+                return not bd or not bd.stackThresholdMaxEnabled
+            end
+            local maxStacksRow
+            maxStacksRow, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Enable Max Stacks",
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.stackThresholdMaxEnabled end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.stackThresholdMaxEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
+                  end },
+                { type = "label", text = "Ticks at Stacks",
+                  tooltip = "Comma separated stack counts to put a tick mark at. Type all to mark every stack." }
+            );  y = y - h
+            -- Inline slider on Enable Max Stacks toggle (same as inline swatch positioning)
+            do
+                local rgn = maxStacksRow._leftRegion
+                local ctrl = rgn._control
+                local SL = EllesmereUI.SL or {}
+                local trackFrame, valBox, _, slThumb = EllesmereUI.BuildSliderCore(
+                    rgn, 90, 4, 14, 36, 26, 13, SL.INPUT_A or 0.6,
+                    1, 100, 1,
+                    function() local bd = SelectedTBB(); return bd and bd.stackThresholdMax or 10 end,
+                    function(v) local bd = SelectedTBB(); if bd then bd.stackThresholdMax = v; RefreshTBB() end end,
+                    true)
+                PP.Point(valBox, "RIGHT", ctrl, "LEFT", -6, 0)
+                PP.Point(trackFrame, "RIGHT", valBox, "LEFT", -8, 0)
+                -- Disable block
+                local block = CreateFrame("Frame", nil, trackFrame)
+                block:SetPoint("TOPLEFT", trackFrame, "TOPLEFT", -4, 4)
+                block:SetPoint("BOTTOMRIGHT", valBox, "BOTTOMRIGHT", 4, -4)
+                block:SetFrameLevel(trackFrame:GetFrameLevel() + 10)
+                block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(trackFrame, EllesmereUI.DisabledTooltip("Max Stacks"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdateMaxSliderState()
+                    local off = maxStacksOff()
+                    trackFrame:SetAlpha(off and 0.3 or 1)
+                    valBox:SetAlpha(off and 0.3 or 1)
+                    valBox:EnableMouse(not off)
+                    if slThumb then slThumb._sliderDisabled = off end
+                    if off then block:Show() else block:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateMaxSliderState)
+                UpdateMaxSliderState()
+            end
+            -- Add "(Ex: 1,5,8)" suffix in smaller, dimmer text
+            do
+                local ticksLabel = maxStacksRow._rightRegion and maxStacksRow._rightRegion._label
+                if ticksLabel then
+                    local suffix = maxStacksRow._rightRegion:CreateFontString(nil, "OVERLAY")
+                    suffix:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                    suffix:SetTextColor(1, 1, 1, 0.35)
+                    suffix:SetPoint("LEFT", ticksLabel, "RIGHT", 5, 0)
+                    suffix:SetText(EllesmereUI.L("(Ex: 1,5,8)"))
+                end
+            end
+            -- Inline input on Ticks at Stacks (matches slider value box style)
+            do
+                local rgn = maxStacksRow._rightRegion
+                local SIDE_PAD = 20
+                local FONT = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+                local INPUT_W = 70
+                local INPUT_H = 26
+
+                local box = CreateFrame("EditBox", nil, rgn)
+                PP.Size(box, INPUT_W, INPUT_H)
+                PP.Point(box, "RIGHT", rgn, "RIGHT", -SIDE_PAD, 0)
+                box:SetFrameLevel(rgn:GetFrameLevel() + 2)
+                box:SetAutoFocus(false)
+                box:SetJustifyH("CENTER")
+                box:SetFont(FONT, 13, "")
+                box:SetTextColor(
+                    EllesmereUI.TEXT_DIM_R or 0.75,
+                    EllesmereUI.TEXT_DIM_G or 0.75,
+                    EllesmereUI.TEXT_DIM_B or 0.75,
+                    EllesmereUI.TEXT_DIM_A or 1)
+                -- Background matching slider input box
+                local bg = box:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                bg:SetColorTexture(
+                    EllesmereUI.SL_INPUT_R or 0.08,
+                    EllesmereUI.SL_INPUT_G or 0.08,
+                    EllesmereUI.SL_INPUT_B or 0.08,
+                    (EllesmereUI.SL_INPUT_A or 0.5) + (EllesmereUI.MW_INPUT_ALPHA_BOOST or 0.15))
+                -- Border matching slider input box
+                if PP.CreateBorder then
+                    PP.CreateBorder(box,
+                        EllesmereUI.BORDER_R or 0.15,
+                        EllesmereUI.BORDER_G or 0.15,
+                        EllesmereUI.BORDER_B or 0.15,
+                        EllesmereUI.SL_INPUT_BRD_A or 0.4, 1)
+                end
+
+                box:SetScript("OnEnterPressed", function(self)
+                    self:ClearFocus()
+                    local bd = SelectedTBB(); if bd then
+                        bd.stackThresholdTicks = self:GetText(); RefreshTBB()
+                    end
+                end)
+                box:SetScript("OnEscapePressed", function(self)
+                    self:ClearFocus()
+                    local bd = SelectedTBB()
+                    self:SetText(bd and bd.stackThresholdTicks or "")
+                end)
+
+                -- Inline swatch for tick mark color (left of the input box)
+                local tickSwatch, updateTickSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, box:GetFrameLevel() + 1,
+                    function()
+                        local bd = SelectedTBB()
+                        if not bd then return 1, 1, 1, 1 end
+                        local a = bd.stackThresholdTickA
+                        if a == nil then a = 1 end
+                        return bd.stackThresholdTickR or 1, bd.stackThresholdTickG or 1,
+                               bd.stackThresholdTickB or 1, a
+                    end,
+                    function(r, g, b, a)
+                        local bd = SelectedTBB(); if not bd then return end
+                        bd.stackThresholdTickR, bd.stackThresholdTickG = r, g
+                        bd.stackThresholdTickB, bd.stackThresholdTickA = b, a; RefreshTBB()
+                    end,
+                    true, 20)
+                PP.Point(tickSwatch, "RIGHT", box, "LEFT", -8, 0)
+                local tickBlock = CreateFrame("Frame", nil, tickSwatch)
+                tickBlock:SetAllPoints(); tickBlock:SetFrameLevel(tickSwatch:GetFrameLevel() + 10)
+                tickBlock:EnableMouse(true)
+                tickBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(tickSwatch, EllesmereUI.DisabledTooltip("Max Stacks"))
+                end)
+                tickBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local function UpdateTicksInput()
+                    local bd = SelectedTBB()
+                    box:SetText(bd and bd.stackThresholdTicks or "")
+                    local off = maxStacksOff()
+                    box:SetAlpha(off and 0.3 or 1)
+                    box:EnableMouse(not off)
+                    if off then tickSwatch:SetAlpha(0.3); tickBlock:Show()
+                    else tickSwatch:SetAlpha(1); tickBlock:Hide() end
+                    if updateTickSwatch then updateTickSwatch() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateTicksInput)
+                UpdateTicksInput()
+            end
+
+            -- Row 3: Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
+            local threshRow
+            threshRow, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Enable Stack Threshold",
+                  tooltip = "This will change the color of your bar if you have more than your chosen number of stacks",
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.stackThresholdEnabled end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.stackThresholdEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
+                  end },
+                { type = "slider", text = "Stack Threshold",
+                  min = 0, max = 100, step = 1,
+                  disabled = function()
+                      local bd = SelectedTBB()
+                      if not bd or not bd.stackThresholdEnabled then return true end
+                      return bd.stackThresholdMulti and true or false
+                  end,
+                  disabledTooltip = function()
+                      local bd = SelectedTBB()
+                      if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
+                          return StackThreshReplacesTip()
+                      end
+                      return EllesmereUI.DisabledTooltip("Stack Threshold")
+                  end,
+                  rawTooltip = true,
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.stackThreshold or 5 end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.stackThreshold = v; RefreshTBB()
+                  end }
+            );  y = y - h
+            -- Inline swatch on Enable Stack Threshold toggle
+            do
+                local rgn = threshRow._leftRegion
+                local ctrl = rgn._control
+                local threshSwatch, updateThreshSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, threshRow:GetFrameLevel() + 3,
+                    function()
+                        local bd = SelectedTBB()
+                        if not bd then return 0.8, 0.1, 0.1, 1 end
+                        return bd.stackThresholdR or 0.8, bd.stackThresholdG or 0.1, bd.stackThresholdB or 0.1, bd.stackThresholdA or 1
+                    end,
+                    function(r, g, b, a)
+                        local bd = SelectedTBB(); if not bd then return end
+                        bd.stackThresholdR, bd.stackThresholdG, bd.stackThresholdB, bd.stackThresholdA = r, g, b, a; RefreshTBB()
+                    end,
+                    true, 20)
+                PP.Point(threshSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                local threshBlock = CreateFrame("Frame", nil, threshSwatch)
+                threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
+                threshBlock:EnableMouse(true)
+                threshBlock:SetScript("OnEnter", function()
+                    local bd = SelectedTBB()
+                    if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
+                        EllesmereUI.ShowWidgetTooltip(threshSwatch, StackThreshReplacesTip())
+                        return
+                    end
+                    EllesmereUI.ShowWidgetTooltip(threshSwatch, EllesmereUI.DisabledTooltip("Stack Threshold"))
+                end)
+                threshBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                -- Cog: opens the multi-threshold editor. Stays usable while multi is
+                -- on, since it is the only way back out of it.
+                EllesmereUI.BuildInlineCog(rgn, {
+                    anchorTo = threshSwatch,
+                    show = function(self)
+                        ShowStackThreshEditor({
+                            getCfg    = SelectedTBB,
+                            refreshFn = RefreshTBB,
+                            anchor    = self,
+                        })
+                    end,
+                    tip = StackThreshHelpTip(),
+                    disabled = function() local bd = SelectedTBB(); return not (bd and bd.stackThresholdEnabled) end,
+                    disabledTooltip = "Stack Threshold",
+                })
+
+                local function UpdateThreshSwatchState()
+                    local bd = SelectedTBB()
+                    local enabled = bd and bd.stackThresholdEnabled
+                    -- The swatch edits the single threshold color, so multi masks it
+                    -- the same way it masks the slider.
+                    local off = not enabled or (bd.stackThresholdMulti and true or false)
+                    if off then threshSwatch:SetAlpha(0.3); threshBlock:Show()
+                    else threshSwatch:SetAlpha(1); threshBlock:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(function() updateThreshSwatch(); UpdateThreshSwatchState() end)
+                UpdateThreshSwatchState()
+            end
         end
 
         -- Preview click-navigation map: preview element -> section + row.
