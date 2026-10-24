@@ -134,6 +134,8 @@ end
 _CDMApplyVisibility = function()
     local p = ECME.db and ECME.db.profile
     if not p then return end
+    -- Tracking Bars drawn as rings have no tick; they follow the same visibility edges.
+    if ns.TBBRings_ApplyVisibility then ns.TBBRings_ApplyVisibility() end
     local inCombat = _inCombat
     -- Full vehicle UI: hide all bars
     local inVehicle = _cdmInVehicle

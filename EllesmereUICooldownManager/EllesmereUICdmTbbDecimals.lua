@@ -98,6 +98,7 @@ local function GetDecimalFormatter(thr)
     formatterByThr[thr] = f
     return f
 end
+ns.TBBDecimalFormatter = GetDecimalFormatter
 
 -- Variant expansion for one stored spell id: the live aura can come up under
 -- the talent override (or base) form of the id the config captured.
@@ -130,6 +131,7 @@ end
 -- appears often carries an id that exists ONLY in linkedSpellIDs (variant chains:
 -- rituals, Eclipse-style pairs), never in the stored config ids, and without it the
 -- slot filter can never match. Sync-time only (rebuilds), never per tick.
+-- Returns the cooldownInfo it read, or nil when the bar has no viewer frame.
 local function AddCooldownInfoIDs(include, cfg)
     local frame = ns.FindTBBChild and ns.FindTBBChild(cfg)
     if not frame then return end
@@ -150,6 +152,7 @@ local function AddCooldownInfoIDs(include, cfg)
             AddCleanID(include, info.linkedSpellIDs[k])
         end
     end
+    return info
 end
 
 local host           -- shown 1px anchor for the container (alpha 0, mouse-off)
@@ -193,25 +196,28 @@ local function ReleaseCurrent()
     end
 end
 
--- Desired slot set: one entry per enabled, aura-driven bar with Decimals on.
--- Self-timed presets (lust/potions/Time Spiral) are excluded -- they already
--- render tenths from their own clean, never-secret countdown.
+-- Aura slot set for the enabled, aura-driven bars `accept` picks (shared with the
+-- ring display). Self-timed presets (lust/potions/Time Spiral) and cooldown bars
+-- are never included: they have no aura to bind.
 --
 -- Two passes. Pass 1 collects each bar's SAVED identity (stored ids + override/base
 -- variants) and claims those ids for that bar. Pass 2 adds the cooldownInfo enrichment,
--- but an id claimed by a DIFFERENT decimal bar's saved config never leaks in: spell
+-- but an id claimed by a DIFFERENT accepted bar's saved config never leaks in: spell
 -- families share one cooldownInfo (ritual + art chains list each other in
 -- linkedSpellIDs), and family-wide filters on two bars made the engine bind the live
--- aura to whichever slot it liked -- the losing bar showed no decimals at all.
-local function CollectDesired()
+-- aura to whichever slot it liked -- the losing bar showed nothing at all.
+--
+-- Returns { { index, cfg, include, ids, info }, ... } in bar order, or nil.
+-- info is the bar's cooldownInfo, nil when it has no viewer frame yet.
+function ns.TBBCollectAuraSlots(accept)
     local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
     local bars = tbb and tbb.bars
-    if not bars then return nil, "" end
+    if not bars then return nil end
 
     local work, claimed
     for i, cfg in ipairs(bars) do
-        if cfg.enabled ~= false and cfg.timerDecimals and not cfg.popularKey
-           and cfg.trackType ~= "cooldown" then
+        if cfg.enabled ~= false and not cfg.popularKey
+           and cfg.trackType ~= "cooldown" and accept(cfg) then
             local include = {}
             AddVariants(include, cfg.spellID)
             AddVariants(include, cfg.baseSpellID)
@@ -228,14 +234,13 @@ local function CollectDesired()
             end
         end
     end
-    if not work then return nil, "" end
+    if not work then return nil end
 
-    local desired, sigParts = {}, {}
     local extra = {}
     for n = 1, #work do
         local w = work[n]
         wipe(extra)
-        AddCooldownInfoIDs(extra, w.cfg)
+        w.info = AddCooldownInfoIDs(extra, w.cfg)
         for id in pairs(extra) do
             local owner = claimed[id]
             if owner == nil or owner == w.index then
@@ -245,11 +250,28 @@ local function CollectDesired()
         local ids = {}
         for id in pairs(w.include) do ids[#ids + 1] = id end
         table.sort(ids)
+        w.ids = ids
+    end
+    return work
+end
+
+-- Ring bars render their own timer, so they never get a decimals slot.
+local function WantsDecimals(cfg)
+    return cfg.timerDecimals and not ns.TBBIsRing(cfg)
+end
+
+-- Desired slot set: one entry per enabled, aura-driven bar with Decimals on.
+local function CollectDesired()
+    local work = ns.TBBCollectAuraSlots(WantsDecimals)
+    if not work then return nil, "" end
+    local desired, sigParts = {}, {}
+    for n = 1, #work do
+        local w = work[n]
         -- thr intentionally stays OUT of the signature: a slider move
         -- re-registers the live binding in place (no container swap).
-        desired[#desired + 1] = { index = w.index, include = w.include, ids = ids,
+        desired[#desired + 1] = { index = w.index, include = w.include, ids = w.ids,
             thr = ClampThr(w.cfg.timerDecimalThreshold) }
-        sigParts[#sigParts + 1] = w.index .. "=" .. table.concat(ids, ",")
+        sigParts[#sigParts + 1] = w.index .. "=" .. table.concat(w.ids, ",")
     end
     return desired, table.concat(sigParts, ";")
 end

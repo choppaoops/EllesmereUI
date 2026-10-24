@@ -119,6 +119,14 @@ local function TBBVisibilityHides(cfg)
     return false
 end
 
+-- The same verdict for displays outside the tick (rings, driven by visibility edges),
+-- Only In Combat included.
+function ns.TBBVisibilityHides(cfg)
+    TBBFillVisState()
+    if TBBVisibilityHides(cfg) then return true end
+    return cfg.onlyInCombat and not _tbbVisState.inCombat or false
+end
+
 -- Does this bar rely on a Visibility mode or option? Mirrors what TBBVisibilityHides reads,
 -- minus hideWhenInactive/onlyInCombat, which flip on the aura and combat edges the sleeper
 -- already wakes on. Option keys come from the shared list so a new one is covered here too.

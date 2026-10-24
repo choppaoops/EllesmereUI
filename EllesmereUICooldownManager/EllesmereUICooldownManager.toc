@@ -51,6 +51,7 @@ EUI_CDM_BuffBarTick.lua
 EUI_CDM_BuffBarBuild.lua
 EUI_CDM_BuffBarUnlock.lua
 EllesmereUICdmTbbDecimals.lua
+EllesmereUICdmBuffRings.lua
 EllesmereUICdmFakeActive.lua
 EllesmereUICdmRPTSync.lua
 EllesmereUICdmTalentConditions.lua

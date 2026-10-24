@@ -42,6 +42,8 @@ function ns.BuildTrackedBuffBars()
 
     -- Per-spec unlock-link views: the global anchor/match stores must hold THIS spec's TBB entries before any anchored-state below is read.
     ns.SyncTBBUnlockLinks()
+    -- Spec, profile or group edits may have moved bars in or out of ring groups.
+    ns.TBBInvalidateRingFlags()
 
     local p = ECME.db.profile
 
@@ -62,6 +64,7 @@ function ns.BuildTrackedBuffBars()
         _tbbWake._enabled = false
         _tbbWake:UnregisterAllEvents()
         if tbbTickFrame then tbbTickFrame:Hide() end
+        if ns.TBBRings_Sync then ns.TBBRings_Sync() end
         return
     end
 
@@ -107,6 +110,10 @@ function ns.BuildTrackedBuffBars()
         bar._tbbVisCond = visCond or nil
 
         if cfg.enabled == false then
+            bar:Hide()
+        elseif ns.TBBIsRing(cfg) then
+            -- Drawn by the ring display: the bar frame stays down and the tick skips it.
+            bar._tbbReady = false
             bar:Hide()
         else
             anyEnabled = true
@@ -302,6 +309,8 @@ function ns.BuildTrackedBuffBars()
 
     -- 12.1 engine-driven decimal timer text (nil on 12.0: module self-gates)
     if ns.TBBDecimals_Sync then ns.TBBDecimals_Sync() end
+    -- Groups displayed as rings
+    if ns.TBBRings_Sync then ns.TBBRings_Sync() end
 
     -- Match pads follow each bar's border settings: a bar or group whose pad
     -- changed is re-pushed through its match once, deferred (compare-only here).

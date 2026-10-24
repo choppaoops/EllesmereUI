@@ -218,12 +218,66 @@ function ns.TBBBarGroupID(cfg)
     return (cfg.grouped ~= false) and 1 or 0
 end
 
+-- Text and icon positions a bar takes when its group turns into rings. The bar's
+-- own positions are kept on it (cfg.barTextPositions) and put back when it leaves
+-- the ring display, so a round trip leaves the bar as it was.
+local RING_TEXT_DEFAULTS = {
+    namePosition = "right", timerPosition = "right", iconDisplay = "right",
+    stacksPosition = "bottom", showName = true, showTimer = true,
+}
+local BAR_TEXT_KEYS = { "namePosition", "timerPosition", "stacksPosition", "iconDisplay", "showName", "showTimer" }
+
+local function RingTextDefaults(cfg, on)
+    if cfg.popularKey or cfg.trackType == "cooldown" then return end
+    if on then
+        if cfg.barTextPositions then return end
+        local saved = {}
+        for _, k in ipairs(BAR_TEXT_KEYS) do saved[k] = cfg[k] end
+        cfg.barTextPositions = saved
+        for k, v in pairs(RING_TEXT_DEFAULTS) do cfg[k] = v end
+    else
+        local saved = cfg.barTextPositions
+        if not saved then return end
+        for _, k in ipairs(BAR_TEXT_KEYS) do cfg[k] = saved[k] end
+        cfg.barTextPositions = nil
+    end
+end
+
 function ns.TBBSetBarGroup(cfg, gid)
     if not cfg then return end
     gid = gid or 0
+    local old = ns.TBBBarGroupID(cfg)
+    local wasRing = old ~= 0 and ns.TBBGroupIsRings(old)
+    local isRing = gid ~= 0 and ns.TBBGroupIsRings(gid)
+    if wasRing ~= isRing then RingTextDefaults(cfg, isRing) end
     cfg.groupId = gid
     -- Legacy mirror: older versions only know one group ("checked" bars).
     cfg.grouped = (gid ~= 0)
+    ns.TBBInvalidateRingFlags()
+end
+
+-- A bar in a group displayed as rings (EllesmereUICdmBuffRings.lua) takes no part in
+-- the bar pipeline (frame, chain, reflow, mover). Presets and cooldown bars have no
+-- aura to bind and stay bars in any group. Memoized per config (the tick and the
+-- reflow ask often); anything that moves a bar between groups or flips a group's
+-- display mode invalidates it.
+local _tbbRingFlag = setmetatable({}, { __mode = "k" })
+function ns.TBBIsRing(cfg)
+    if cfg == nil then return false end
+    local f = _tbbRingFlag[cfg]
+    if f == nil then
+        f = not cfg.popularKey and cfg.trackType ~= "cooldown"
+        if f then
+            local gid = ns.TBBBarGroupID(cfg)
+            f = gid ~= 0 and ns.TBBGroupIsRings(gid)
+        end
+        _tbbRingFlag[cfg] = f
+    end
+    return f
+end
+
+function ns.TBBInvalidateRingFlags()
+    wipe(_tbbRingFlag)
 end
 
 -- Sorted list of group ids currently used by at least one bar.
@@ -317,6 +371,75 @@ function ns.TBBGroupSpacing(gid)
     return GroupSpacingOf(ns.GetTrackedBuffBars(), gid)
 end
 
+-- Ring display is group layout: display ("rings" or nil), ringOrder, ringSize,
+-- ringWidth, ringGap and ringPos (the ring centre). A global group keeps them on its
+-- registry entry, like grow/spacing/pos; otherwise they live in the per-spec group
+-- store. Bars keep no ring keys.
+ns.TBB_RING_GROUP_KEYS = { "display", "ringOrder", "ringSize", "ringWidth", "ringGap", "ringPos" }
+
+function ns.TBBGroupRingStore(gid, create)
+    if not gid or gid == 0 then return nil end
+    local g = TBBGroupStore(ns.GetTrackedBuffBars(), gid, create)
+    if g and g.globalKey then
+        local e = ns.TBBGlobalGroup and ns.TBBGlobalGroup(g.globalKey)
+        if e then return e end
+    end
+    return g
+end
+
+function ns.TBBGroupIsRings(gid)
+    local s = ns.TBBGroupRingStore(gid)
+    return s ~= nil and s.display == "rings"
+end
+
+-- Every bar of a group: on the active spec, or on every spec linked to it when
+-- the group is global (its display mode is shared).
+local function ForEachGroupMember(gid, fn)
+    local gkey = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
+    if not gkey then
+        for _, c in ipairs(ns.GetTrackedBuffBars().bars or {}) do
+            if ns.TBBBarGroupID(c) == gid then fn(c) end
+        end
+        return
+    end
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    for _, prof in pairs(sp or {}) do
+        local tbb = type(prof) == "table" and prof.trackedBuffBars
+        if tbb and tbb.groups then
+            for k, g in pairs(tbb.groups) do
+                local kn = tonumber(k)
+                if g.globalKey == gkey and kn then
+                    for _, c in ipairs(tbb.bars or {}) do
+                        if ns.TBBBarGroupID(c) == kn then fn(c) end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function ns.TBBSetGroupDisplay(gid, rings)
+    local s = ns.TBBGroupRingStore(gid, true)
+    if not s then return end
+    s.display = rings and "rings" or nil
+    ForEachGroupMember(gid, function(c) RingTextDefaults(c, rings and true or false) end)
+    ns.TBBInvalidateRingFlags()
+    SetReflowDirty(true)
+end
+
+-- Copies the ring keys from one group store to another (global opt-in / detach).
+local function CopyRingKeys(from, to)
+    for _, k in ipairs(ns.TBB_RING_GROUP_KEYS) do
+        local v = from[k]
+        if type(v) == "table" then
+            local c = {}
+            for tk, tv in pairs(v) do c[tk] = tv end
+            v = c
+        end
+        to[k] = v
+    end
+end
+
 function ns.TBBSetGroupSpacing(gid, v)
     local t = ns.GetTrackedBuffBars()
     local gkey = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
@@ -335,6 +458,7 @@ function ns.TBBResetGroupSettings(gid)
     local t = ns.GetTrackedBuffBars()
     if t.groups then t.groups[_gidKeys[gid]] = nil end
     SetReflowDirty(true)
+    ns.TBBInvalidateRingFlags()
 end
 
 -- Optional user-given group name (Group Settings input). Empty/absent = nil, callers fall back to the default "Group N" label.
@@ -540,6 +664,8 @@ do
     local function TBBShiftDirFor(entry, gk)
         local mode = entry and entry.shiftNoBar
         if mode ~= "Up" and mode ~= "Down" then return 0 end
+        -- A ring group keeps its centre: there is no empty bar slot to cover.
+        if entry.display == "rings" then return 0 end
         local gid = ns.TBBLocalGidForGlobal(gk)
         if gid and ns.TBBGroupAnchorIndex(gid) then return 0 end
         if not TBBGlobalLinkedAnywhere(gk) then return 0 end
@@ -609,8 +735,10 @@ do
             if pos and pos.point then
                 entry.pos = { point = pos.point, relPoint = pos.relPoint, x = pos.x, y = pos.y }
             end
+            CopyRingKeys(g, entry)
             reg[gkey] = entry
             g.globalKey = gkey
+            ns.TBBInvalidateRingFlags()
         else
             local gkey = g.globalKey
             g.globalKey = nil
@@ -619,6 +747,8 @@ do
                 g.name = entry.name
                 g.grow = entry.grow
                 g.spacing = entry.spacing
+                CopyRingKeys(entry, g)
+                ns.TBBInvalidateRingFlags()
                 if gid == 1 then
                     t.groupGrowDirection = entry.grow
                     t.groupSpacing = entry.spacing
@@ -763,6 +893,7 @@ do
                             g.name = entry.name
                             g.grow = entry.grow
                             g.spacing = entry.spacing
+                            CopyRingKeys(entry, g)
                             if k == "1" then
                                 tbb.groupGrowDirection = entry.grow
                                 tbb.groupSpacing = entry.spacing
@@ -783,6 +914,7 @@ do
             end
         end
         reg[gkey] = nil
+        ns.TBBInvalidateRingFlags()
         -- Retire the group's shift stand-in with it: a leftover frame would keep
         -- resolving through getFrame's session fallback and glue anchored
         -- elements to the deleted group's last position (audit-caught).
@@ -829,12 +961,13 @@ function ns.TBBAutoAddGroupID()
     return best
 end
 
--- Index of a group's anchor = its first enabled member (or nil if none). gid nil = group 1 (legacy callers).
+-- Index of a group's anchor = its first enabled bar member (or nil if none); rings
+-- are not bars. gid nil = group 1 (legacy callers).
 function ns.TBBGroupAnchorIndex(gid)
     gid = gid or 1
     local t = ns.GetTrackedBuffBars()
     for i, c in ipairs(t.bars or {}) do
-        if c.enabled ~= false and ns.TBBBarGroupID(c) == gid then return i end
+        if c.enabled ~= false and ns.TBBBarGroupID(c) == gid and not ns.TBBIsRing(c) then return i end
     end
     return nil
 end
@@ -1101,7 +1234,9 @@ local function ReflowGroup(tbb, gid, bars)
 
     local anchorIdx
     for i, c in ipairs(bars) do
-        if c.enabled ~= false and ns.TBBBarGroupID(c) == gid then anchorIdx = i; break end
+        if c.enabled ~= false and ns.TBBBarGroupID(c) == gid and not ns.TBBIsRing(c) then
+            anchorIdx = i; break
+        end
     end
     if not anchorIdx then return end
 

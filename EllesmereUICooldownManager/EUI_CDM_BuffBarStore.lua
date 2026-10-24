@@ -295,6 +295,9 @@ local function AddTrackedBuffBarCore(tbb, targetGid)
     newBar.glowBased = nil
     newBar.trackType = nil
     newBar.enabled = true
+    -- Not in any group yet: joining a ring group then gives it the ring text
+    -- defaults (a copied preset or style carries bar positions).
+    newBar.groupId = 0
     ns.TBBSetBarGroup(newBar, gid)
     bars[#bars + 1] = newBar
     tbb.selectedBar = #bars
