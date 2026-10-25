@@ -864,19 +864,71 @@ end
 
 -- Lay one group's rings out from its ring layout. Geometry runs innermost first;
 -- Ring Order picks which bar takes each layer. Returns true when a ring is on the target.
-local function LayoutSet(set, list)
-    local store = ns.TBBGroupRingStore(set.gid)
+-- Ring geometry for `n` rings of a group, innermost first, and whether the bar
+-- list maps outermost first.
+local function GroupGeometry(gid, n)
+    local store = ns.TBBGroupRingStore(gid)
     local size = LayoutValue(store, "ringSize")
     local width = LayoutValue(store, "ringWidth")
     local gap = LayoutValue(store, "ringGap")
-    local outerFirst = LayoutValue(store, "ringOrder") == "outer"
+    local geos, prevOuter = {}, nil
+    for step = 1, n do
+        local mid = prevOuter and (prevOuter + gap + width / 2) or (size / 2 - width / 2)
+        geos[step] = PickRing(max(mid, 1), width)
+        prevOuter = geos[step].outer
+    end
+    return geos, LayoutValue(store, "ringOrder") == "outer"
+end
+
+-- Settings preview: what a group draws with every listed bar's aura up.
+-- Returns the layers innermost first ({ cfg, geo }) and, per position, the
+-- column origin { x, y } and its rows ({ style, w, h, layer }); Left / Right
+-- rows are centred on their origin's y, Bottom / Center rows hang from it.
+function ns.TBRPreviewModel(gid, cfgs)
+    AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
+    local n = #cfgs
+    local geos, outerFirst = GroupGeometry(gid, n)
+    local layers = {}
+    for step = 1, n do
+        layers[step] = { cfg = cfgs[outerFirst and (n - step + 1) or step], geo = geos[step] }
+    end
+    local outer = n > 0 and geos[n].outer or 0
+    local cols = {}
+    for i, layer in ipairs(layers) do
+        local cfg = layer.cfg
+        local at = { icon = IconPos(cfg), timer = TimerPos(cfg), stacks = StacksPos(cfg), name = NamePos(cfg) }
+        local byPos = {}
+        for _, kind in ipairs(ROW_KINDS) do
+            local p = at[kind]
+            if p then
+                byPos[p] = byPos[p] or {}
+                table.insert(byPos[p], kind)
+            end
+        end
+        for p, kinds in pairs(byPos) do
+            local col = cols[p]
+            if not col then
+                local r0 = outer + TEXT_MARGIN
+                col = { rows = {},
+                    x = (p == "right" and r0) or (p == "left" and -r0) or 0,
+                    y = (p == "bottom") and -r0 or 0 }
+                cols[p] = col
+            end
+            local style, w, h = RowStyle(layer, p, kinds)
+            col.rows[#col.rows + 1] = { style = style, w = w, h = h, layer = i }
+        end
+    end
+    return layers, cols
+end
+
+local function LayoutSet(set, list)
+    local geos, outerFirst = GroupGeometry(set.gid, #list)
     local anyTarget = false
     local layers = {}
     local prevOuter
     for step = 1, #list do
         local x = list[outerFirst and (#list - step + 1) or step]
-        local mid = prevOuter and (prevOuter + gap + width / 2) or (size / 2 - width / 2)
-        local geo = PickRing(max(mid, 1), width)
+        local geo = geos[step]
         prevOuter = geo.outer
         local r = set.rings[step]
         if not r then

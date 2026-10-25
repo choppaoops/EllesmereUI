@@ -278,6 +278,63 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
 
         local oc = GetTBBPopout()
 
+        -- A ring group (or a ring of one) previews as rings: the whole group, laid
+        -- out like the live display; editing one bar dims the others.
+        local ringGid
+        if mode == "group" then
+            if ns.TBBGroupIsRings and ns.TBBGroupIsRings(_tbbSelectedGroup) then ringGid = _tbbSelectedGroup end
+        elseif ns.TBBIsRing and ns.TBBIsRing(list[1].cfg) then
+            ringGid = ns.TBBBarGroupID(list[1].cfg)
+        end
+        if ringGid and ns.CDMO_DrawTBRPreview then
+            local selected = mode == "bar" and list[1].cfg or nil
+            local cfgs, idxOf = {}, {}
+            for i, c in ipairs(bars) do
+                if ns.TBBBarGroupID(c) == ringGid and ns.TBBIsRing(c) then
+                    cfgs[#cfgs + 1] = c
+                    idxOf[c] = i
+                end
+            end
+            for n = 1, #_tbbPopoutBars do
+                if _tbbPopoutBars[n] then
+                    HideTBBPvNav(_tbbPopoutBars[n])
+                    _tbbPopoutBars[n]:Hide()
+                end
+            end
+            local holder, el, er, et, eb = ns.CDMO_DrawTBRPreview(oc, ringGid, cfgs, selected, function(c)
+                _tbbSelectedBar = idxOf[c]
+                _tbbSelectedGroup = nil
+                EllesmereUI:RefreshPage(true)
+            end)
+            local PAD_IN, TITLE_H, HINT_H = 20, 25, 18
+            local es = oc:GetEffectiveScale()
+            local function Px(v) return EllesmereUI.PP.SnapForES(v, es) end
+            local ocW = Px(math.max(el + er + PAD_IN * 2, 240))
+            oc:SetSize(ocW, Px(et + eb + PAD_IN * 2 + TITLE_H + HINT_H))
+            holder:ClearAllPoints()
+            holder:SetPoint("CENTER", oc, "TOPLEFT", Px((ocW - el - er) / 2 + el), -Px(PAD_IN + TITLE_H + et))
+            local gname = (ns.TBBGroupName and ns.TBBGroupName(ringGid))
+                or (EllesmereUI.L("Group") .. " " .. ringGid)
+            oc._title:SetText(gname .. " " .. EllesmereUI.L("Preview"))
+            oc._hint:SetText(EllesmereUI.L("Click a text to edit its bar"))
+            oc._hint:Show()
+            oc:ClearAllPoints()
+            oc:Show()
+            local sf = EllesmereUI._scrollFrame
+            if sf then
+                local dy = oc:GetHeight() / 2
+                oc:SetPoint("TOPRIGHT", sf, "LEFT", 0, dy)
+                local right, top = oc:GetRight(), oc:GetTop()
+                if right and top then
+                    oc:SetPoint("TOPRIGHT", sf, "LEFT", Px(right) - right, dy + Px(top) - top)
+                end
+            else
+                oc:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
+            return
+        end
+        if ns.CDMO_HideTBRPreview then ns.CDMO_HideTBRPreview() end
+
         -- Build/refresh each preview bar with the LIVE bar code
         for n, e in ipairs(list) do
             local wrap = _tbbPopoutBars[n]
