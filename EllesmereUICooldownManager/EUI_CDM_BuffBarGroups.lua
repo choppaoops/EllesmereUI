@@ -1037,6 +1037,7 @@ local TBB_STYLE_KEYS = {
     "iconDisplay", "iconSize", "iconX", "iconY", "iconBorderSize",
     "stacksPosition", "stacksSize", "stacksX", "stacksY",
     "stacksTextR", "stacksTextG", "stacksTextB", "stacksTextA",
+    "nameRingClock", "timerRingClock", "stacksRingClock", "actionCountClock", "actionCountSize",
     "borderSize", "borderSizePx", "borderTexture", "borderR", "borderG", "borderB",
     "borderTextureOffset", "borderTextureOffsetY",
     "borderTextureShiftX", "borderTextureShiftY", "borderBehind",

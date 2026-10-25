@@ -76,6 +76,7 @@ local pv -- { holder, rings = {}, rows = {} }
 local function PreviewText(it)
     if it.kind == "name" then return it.text end
     if it.kind == "timer" then return it.interval and "3.2" or "12" end
+    if it.kind == "count" then return "89" end
     return "3"
 end
 
@@ -134,6 +135,32 @@ function ns.CDMO_DrawTBRPreview(parent, gid, cfgs, selected, onSelect)
         local frac = SAMPLE_FILL[(i - 1) % #SAMPLE_FILL + 1]
         r.cd:SetCooldown(GetTime() - frac * 60, 60)
         r.cd:SetPaused(true)
+        -- Texts set On Ring, on the band at their clock positions.
+        r.fs = r.fs or {}
+        for _, fs in pairs(r.fs) do fs:Hide() end
+        local texts = ns.TBRRingTextStyles and ns.TBRRingTextStyles(cfg)
+        if texts then
+            if not r.textHost then
+                r.textHost = CreateFrame("Frame", nil, r)
+                r.textHost:SetAllPoints()
+            end
+            r.textHost:SetFrameLevel(r.cd:GetFrameLevel() + 2)
+            local mid = geo.outer - geo.width / 2
+            for kind, t in pairs(texts) do
+                local fs = r.fs[kind]
+                if not fs then
+                    fs = r.textHost:CreateFontString(nil, "OVERLAY")
+                    r.fs[kind] = fs
+                end
+                EllesmereUI.ApplyModuleFont(fs, nil, t.size, "cdm")
+                fs:SetTextColor(t.r, t.g, t.b, t.a)
+                local x, yy = ns.TBRClockOffset(t.clock, mid)
+                fs:ClearAllPoints()
+                fs:SetPoint("CENTER", r.textHost, "CENTER", x + t.ox, yy + t.oy)
+                fs:SetText(PreviewText({ kind = kind, text = t.text, interval = t.interval }))
+                fs:Show()
+            end
+        end
         r:SetAlpha((selected and selected ~= cfg) and 0.35 or (cfg.opacity or 1))
         r:Show()
     end

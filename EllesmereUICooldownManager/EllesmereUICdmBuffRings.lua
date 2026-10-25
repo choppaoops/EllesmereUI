@@ -113,6 +113,16 @@ local function IconPos(cfg)
     return nil
 end
 
+-- "On Ring": the text sits on its own ring's band, at a clock position chosen per
+-- text (12 = top). Raw positions, so "ring" is seen before RingPos drops it.
+local RING_TEXT_KINDS = { "name", "timer", "stacks" }
+local RING_CLOCK_DEFAULT = { name = 9, timer = 12, stacks = 6 }
+local function RawPos(cfg, kind)
+    if kind == "name" then return cfg.namePosition or ((cfg.showName ~= false) and "left" or "none") end
+    if kind == "timer" then return cfg.timerPosition or (cfg.showTimer and "right" or "none") end
+    return cfg.stacksPosition or "center"
+end
+
 local function TextColor(cfg, prefix)
     local r, g, b, a = cfg[prefix .. "TextR"], cfg[prefix .. "TextG"], cfg[prefix .. "TextB"], cfg[prefix .. "TextA"]
     if r == nil then r = 1 end
@@ -144,6 +154,46 @@ local function TextWidth(text, size)
     ruler:SetText(text)
     return ruler:GetStringWidth() or (size * #text * 0.6)
 end
+
+-- The texts a bar puts on its ring: kind -> { clock, size, colour, offsets, and
+-- the name or the duration formatter }. nil when none.
+local function RingTextStyles(cfg)
+    local out
+    for _, kind in ipairs(RING_TEXT_KINDS) do
+        if RawPos(cfg, kind) == "ring" then
+            local t = { clock = cfg[kind .. "RingClock"] or RING_CLOCK_DEFAULT[kind],
+                size = cfg[kind .. "Size"] or 11,
+                ox = cfg[kind .. "X"] or 0, oy = cfg[kind .. "Y"] or 0 }
+            t.r, t.g, t.b, t.a = TextColor(cfg, kind)
+            if kind == "name" then
+                t.text = DisplayName(cfg)
+            elseif kind == "timer" then
+                local fmt = cfg.timerDecimals and ns.TBBDecimalFormatter
+                    and ns.TBBDecimalFormatter(cfg.timerDecimalThreshold)
+                t.fmt = fmt or (AK and AK.GetDurationFormatter(false))
+                t.fmtKey = fmt and ("d" .. tostring(cfg.timerDecimalThreshold)) or "w"
+                t.interval = fmt and 0.05 or nil
+            end
+            out = out or {}
+            out[kind] = t
+        end
+    end
+    -- Action Count: the count the spell's action button shows, on the ring.
+    if cfg.actionCount then
+        local t = { clock = cfg.actionCountClock or 3, size = cfg.actionCountSize or 11, ox = 0, oy = 0 }
+        t.r, t.g, t.b, t.a = TextColor(cfg, "timer")
+        out = out or {}
+        out.count = t
+    end
+    return out
+end
+
+-- Offset of a clock position on a circle of radius r round the centre.
+local function ClockOffset(clock, r)
+    local a = clock / 12 * 2 * math.pi
+    return r * math.sin(a), r * math.cos(a)
+end
+ns.TBRRingTextStyles, ns.TBRClockOffset = RingTextStyles, ClockOffset
 
 --------------------------------------------------------------------------------
 --  State
@@ -194,10 +244,70 @@ local function ApplyRingLook(button, d, style)
     rd.cd:SetReverse(s.reverse)
     -- With the kept track (Hide When Inactive off) the background lives on the wrapper.
     rd.track:SetVertexColor(s.bgR, s.bgG, s.bgB, s.keepTrack and 0 or s.bgA)
+
+    -- Texts on the ring band. Bound on first use (the button's own setters
+    -- rebind fine later); a text not on the ring is hidden.
+    for _, kind in ipairs(RING_TEXT_KINDS) do
+        local t = s.texts and s.texts[kind]
+        local fs = rd.fs[kind]
+        if t then
+            EllesmereUI.ApplyModuleFont(fs, nil, t.size, "cdm")
+            fs:SetTextColor(t.r, t.g, t.b, t.a)
+            local x, y = ClockOffset(t.clock, s.mid)
+            fs:ClearAllPoints()
+            fs:SetPoint("CENTER", rd.textHost, "CENTER", x + t.ox, y + t.oy)
+            if kind == "name" then
+                fs:SetText(t.text)
+            elseif kind == "stacks" and not rd.stacksBound then
+                button:SetApplicationCount(fs, {})
+                rd.stacksBound = true
+            elseif kind == "timer" and rd.fmtKey ~= t.fmtKey then
+                if AK.SetDurationTextSafe(button, fs, AK.BuildDurationTextOpts(t.fmt, nil, t.interval)) then
+                    rd.fmtKey = t.fmtKey
+                elseif AK.AurasRestricted() then
+                    error("ring timer rebind denied") -- deferred to the restriction lift
+                end
+            end
+            fs:Show()
+        else
+            fs:Hide()
+        end
+    end
+end
+
+-- Action Count: the count the tracked spell's action button shows (Alter Time:
+-- the health it will restore), drawn on our own FontString on the wrapper. The
+-- value can be secret; SetText takes it as is. Its holder takes the ring
+-- button's (secret) shown state through SetAlphaFromBoolean, so no Lua reads
+-- it. The button itself must carry no script handlers: the engine refuses to
+-- show a button with secrets once one is set.
+local function UpdateCount(r)
+    local c = r.count
+    if not c then
+        r.countHost:Hide()
+        return
+    end
+    local v = C_ActionBar.GetActionDisplayCount(c.slot)
+    if not (issecretvalue and issecretvalue(v)) and v == nil then v = "" end
+    r.countFS:SetText(v)
+    r.countHost:Show()
+    if r.button then
+        r.countHost:SetAlphaFromBoolean(r.button:IsShown(), 1, 0)
+    else
+        r.countHost:SetAlpha(0)
+    end
+end
+
+local function FindCountSlot(ids)
+    for _, id in ipairs(ids) do
+        local slots = C_ActionBar.FindSpellActionButtons(id)
+        if slots and slots[1] then return slots[1] end
+    end
 end
 
 -- initializeFrame window: the only time the button itself may be anchored.
 local function InitRing(r, button, d)
+    r.button = button
     button:ClearAllPoints()
     button:SetPoint("CENTER", r.wrapper, "CENTER", 0, 0)
     pcall(button.SetMouseClickEnabled, button, false)
@@ -219,7 +329,19 @@ local function InitRing(r, button, d)
     cd:SetHideCountdownNumbers(true)
     cd:SetSwipeTexture(s.tex)
 
-    d.ring = { tex = s.tex, track = track, cd = cd }
+    -- Texts on the ring band, above the swipe. Fonted before any binding.
+    local textHost = CreateFrame("Frame", nil, button)
+    textHost:SetAllPoints(button)
+    textHost:SetFrameLevel(cd:GetFrameLevel() + 2)
+    textHost:EnableMouse(false)
+    local fs = {}
+    for _, kind in ipairs(RING_TEXT_KINDS) do
+        fs[kind] = textHost:CreateFontString(nil, "OVERLAY")
+        EllesmereUI.ApplyModuleFont(fs[kind], nil, 11, "cdm")
+        fs[kind]:Hide()
+    end
+
+    d.ring = { tex = s.tex, track = track, cd = cd, textHost = textHost, fs = fs }
     button:SetDurationCooldown(cd)
     ApplyRingLook(button, d, r.style)
 end
@@ -234,6 +356,12 @@ local function NewRing(set)
     r.keep:SetAllPoints(r.wrapper)
     r.keepTex = r.keep:CreateTexture(nil, "BACKGROUND")
     r.keepTex:SetAllPoints(r.keep)
+    r.countHost = CreateFrame("Frame", nil, r.wrapper)
+    r.countHost:SetAllPoints(r.wrapper)
+    r.countHost:EnableMouse(false)
+    r.countFS = r.countHost:CreateFontString(nil, "OVERLAY")
+    EllesmereUI.ApplyModuleFont(r.countFS, nil, 11, "cdm")
+    r.countHost:Hide()
     r.style = { noRegions = true, width = 1, height = 1, applyExtra = ApplyRingLook, ring = {} }
     AK.styles[r.styleKey] = r.style
     return r
@@ -249,12 +377,38 @@ local function FillRing(r, layer)
     s.bgR, s.bgG, s.bgB, s.bgA = cfg.bgR or 0, cfg.bgG or 0, cfg.bgB or 0, cfg.bgA or 0.4
     s.keepTrack = layer.keepTrack
     s.reverse = cfg.reverseFill and true or false
+    s.texts = RingTextStyles(cfg)
+    s.mid = geo.outer - geo.width / 2
 
     r.wrapper:SetSize(geo.d, geo.d)
     r.wrapper:SetAlpha(cfg.opacity or 1)
     r.keepTex:SetTexture(geo.tex)
     r.keepTex:SetVertexColor(s.bgR, s.bgG, s.bgB, s.bgA)
     r.keep:SetShown(s.keepTrack)
+
+    -- Action Count: the first action slot holding one of the bar's spells.
+    r.count, r.countIDs = nil, nil
+    local ct = s.texts and s.texts.count
+    if ct and C_ActionBar and C_ActionBar.FindSpellActionButtons then
+        r.countIDs = {}
+        for id in pairs(layer.include) do r.countIDs[#r.countIDs + 1] = id end
+        table.sort(r.countIDs)
+        -- A buff's id is rarely the button's: the spell of the same name is
+        -- (Alter Time: buff 342246, spell 342245).
+        local info = C_Spell.GetSpellInfo(DisplayName(cfg))
+        if info and info.spellID then r.countIDs[#r.countIDs + 1] = info.spellID end
+        local slot = FindCountSlot(r.countIDs)
+        if slot then r.count = { slot = slot } end
+    end
+    if r.count then
+        EllesmereUI.ApplyModuleFont(r.countFS, nil, ct.size, "cdm")
+        r.countFS:SetTextColor(ct.r, ct.g, ct.b, ct.a)
+        local x, y = ClockOffset(ct.clock, s.mid)
+        r.countFS:ClearAllPoints()
+        r.countFS:SetPoint("CENTER", r.countHost, "CENTER", x, y)
+        r.countHost:SetFrameLevel(r.wrapper:GetFrameLevel() + 30)
+    end
+    UpdateCount(r)
 
     local sig = IdSig(layer.include)
     if not r.container then
@@ -825,7 +979,42 @@ end
 
 -- A cinematic briefly drops the player's assistability, which voids the spell-ID
 -- filter engine-side; target containers also need a reparse on every target swap.
+local countPending
+local function RefreshCounts()
+    countPending = nil
+    for _, set in pairs(sets) do
+        for _, r in pairs(set.rings) do
+            if r.active and r.countIDs then UpdateCount(r) end
+        end
+    end
+end
+
 local function OnWatcherEvent(_, event)
+    -- Action Count: an aura came or went (the ring buttons update in the same
+    -- pass, so read their state a frame later), the count changed, or the bars
+    -- moved under it.
+    if event == "UNIT_AURA" then
+        if not countPending then
+            countPending = true
+            C_Timer.After(0, RefreshCounts)
+        end
+        return
+    end
+    if event == "ACTIONBAR_UPDATE_STATE" or event == "SPELL_UPDATE_USES"
+       or event == "ACTIONBAR_SLOT_CHANGED" then
+        for _, set in pairs(sets) do
+            for _, r in pairs(set.rings) do
+                if r.active and r.countIDs then
+                    if event == "ACTIONBAR_SLOT_CHANGED" then
+                        local slot = FindCountSlot(r.countIDs)
+                        r.count = slot and { slot = slot } or nil
+                    end
+                    UpdateCount(r)
+                end
+            end
+        end
+        return
+    end
     for _, set in pairs(sets) do
         for _, r in pairs(set.rings) do
             if r.active and (event ~= "PLAYER_TARGET_CHANGED" or r.unit == "target") then
@@ -841,7 +1030,9 @@ local function OnWatcherEvent(_, event)
     end
 end
 
-local function UpdateWatcher(anyRing, anyTarget)
+local COUNT_EVENTS = { "ACTIONBAR_UPDATE_STATE", "SPELL_UPDATE_USES", "ACTIONBAR_SLOT_CHANGED" }
+
+local function UpdateWatcher(anyRing, anyTarget, anyCount)
     if not anyRing then
         if watcher then watcher:UnregisterAllEvents() end
         return
@@ -855,6 +1046,14 @@ local function UpdateWatcher(anyRing, anyTarget)
         watcher:RegisterEvent("PLAYER_TARGET_CHANGED")
     else
         watcher:UnregisterEvent("PLAYER_TARGET_CHANGED")
+    end
+    for _, e in ipairs(COUNT_EVENTS) do
+        if anyCount then watcher:RegisterEvent(e) else watcher:UnregisterEvent(e) end
+    end
+    if anyCount then
+        watcher:RegisterUnitEvent("UNIT_AURA", "player", "target")
+    else
+        watcher:UnregisterEvent("UNIT_AURA")
     end
 end
 
@@ -1011,7 +1210,7 @@ function ns.TBBRings_Sync()
         if not want[key] and set.layers and #set.layers > 0 then ParkSet(set) end
     end
 
-    local anyRing, anyTarget = false, false
+    local anyRing, anyTarget, anyCount = false, false, false
     for key, ws in pairs(want) do
         local set = sets[key] or NewSet(key)
         set.gid = ws.gid
@@ -1021,6 +1220,9 @@ function ns.TBBRings_Sync()
         PlaceHost(set)
         RegisterMover(set)
         anyRing = true
+        for _, l in ipairs(set.layers) do
+            if l.ring.countIDs then anyCount = true end
+        end
     end
-    UpdateWatcher(anyRing, anyTarget)
+    UpdateWatcher(anyRing, anyTarget, anyCount)
 end

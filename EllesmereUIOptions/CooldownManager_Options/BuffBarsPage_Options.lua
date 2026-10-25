@@ -3588,9 +3588,30 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         local TBB_POS_ORDER = { "none", "center", "top", "bottom", "left", "right" }
         -- Rings: Center is the ring centre; Bottom / Left / Right sit outside the
         -- outermost ring at 6 / 9 / 3 o'clock.
+        -- On Ring puts the text on the ring band at its own Ring Position (cog).
         if ringMode then
-            TBB_POS_VALUES = { none = "None", center = "Center", bottom = "Bottom", left = "Left", right = "Right" }
-            TBB_POS_ORDER = { "none", "center", "bottom", "left", "right" }
+            TBB_POS_VALUES = { none = "None", center = "Center", bottom = "Bottom", left = "Left", right = "Right",
+                ring = "On Ring" }
+            TBB_POS_ORDER = { "none", "center", "bottom", "left", "right", "ring" }
+        end
+        -- Cog row for a text set On Ring: where on the band, as a clock position.
+        local RING_CLOCK_DEFAULT = { name = 9, timer = 12, stacks = 6 }
+        local function RingClockRow(kind, posKey, posDefault)
+            return { type = "slider", label = "Ring Position", min = 0.5, max = 12, step = 0.5,
+              tooltip = "Clock position on the ring (12 = top).",
+              disabled = function()
+                  local bd = SelectedTBB()
+                  return not (bd and (bd[posKey] or posDefault(bd)) == "ring")
+              end,
+              disabledTooltip = "On Ring position",
+              get = function()
+                  local bd = SelectedTBB()
+                  return bd and bd[kind .. "RingClock"] or RING_CLOCK_DEFAULT[kind]
+              end,
+              set = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd[kind .. "RingClock"] = v; RefreshTBB()
+              end }
         end
 
         -- When a text element claims a position, evict any other text already there so
@@ -3734,7 +3755,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -- Cog on Name Text: text size + x/y
         do
             local rgn = nameRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            local cog = {
                 title = "Name Text Settings",
                 icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function()
@@ -3775,7 +3796,12 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                           bd.nameY = v; RefreshTBB()
                       end },
                 },
-            })
+            }
+            if ringMode then
+                cog.rows[#cog.rows + 1] = RingClockRow("name", "namePosition",
+                    function(bd) return (bd.showName ~= false) and "left" or "none" end)
+            end
+            EllesmereUI.BuildInlineCog(rgn, cog)
         end
         -- Sync icon on Name Text
         do
@@ -3849,6 +3875,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                           local bd = SelectedTBB(); if not bd then return end
                           bd.timerDecimalThreshold = v; RefreshTBB()
                       end })
+            if ringMode then
+                durationRows[#durationRows + 1] = RingClockRow("timer", "timerPosition",
+                    function(bd) return bd.showTimer and "right" or "none" end)
+            end
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Duration Text Settings",
                 rows = durationRows,
@@ -3924,7 +3954,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
         do
             local rgn = stacksRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            local cog = {
                 title = "Stacks Text Settings",
                 icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function()
@@ -3950,6 +3980,48 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                       set = function(v)
                           local bd = SelectedTBB(); if not bd then return end
                           bd.stacksY = v; RefreshTBB()
+                      end },
+                },
+            }
+            if ringMode then
+                cog.rows[#cog.rows + 1] = RingClockRow("stacks", "stacksPosition",
+                    function() return "center" end)
+            end
+            EllesmereUI.BuildInlineCog(rgn, cog)
+        end
+
+        -- Action Count | blank (rings only): the number this spell's action button
+        -- shows, on the ring at its own Ring Position. Duration Text's colour.
+        if ringMode then
+            local countRow
+            countRow, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Action Count",
+                  tooltip = "Shows the number on this spell's action button (Alter Time: the health it restores) on the ring. The spell must be on an action bar.",
+                  getValue = function() local bd = SelectedTBB(); return bd and bd.actionCount == true end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      bd.actionCount = v or nil; RefreshTBB(); EllesmereUI:RefreshPage()
+                  end },
+                EllesmereUI.BlankRowCfg()
+            );  y = y - h
+            EllesmereUI.BuildInlineCog(countRow._leftRegion, {
+                title = "Action Count Settings",
+                icon = EllesmereUI.DIRECTIONS_ICON,
+                disabled = function() local bd = SelectedTBB(); return not (bd and bd.actionCount) end,
+                disabledTooltip = "Action Count",
+                rows = {
+                    { type = "slider", label = "Ring Position", min = 0.5, max = 12, step = 0.5,
+                      tooltip = "Clock position on the ring (12 = top).",
+                      get = function() local bd = SelectedTBB(); return bd and bd.actionCountClock or 3 end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.actionCountClock = v; RefreshTBB()
+                      end },
+                    { type = "slider", label = "Size", min = 6, max = 24, step = 1,
+                      get = function() local bd = SelectedTBB(); return bd and bd.actionCountSize or 11 end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.actionCountSize = v; RefreshTBB()
                       end },
                 },
             })
