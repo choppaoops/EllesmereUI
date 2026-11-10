@@ -40,6 +40,8 @@ initFrame:SetScript("OnEvent", function(self)
     end
     local function Cfg(k)    return DB()[k]  end
     local function Set(k, v) DB()[k] = v     end
+    -- Switch by Content: the content its rows edit (page state, not saved)
+    local dmContentPick
 
     -- All settings are picked up on the next refresh cycle (0.3s combat,
     -- 2s idle). Just Set() and go -- except the WoW Forever look's Border
@@ -387,6 +389,85 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
         y = y - h
+
+        -- SWITCH BY CONTENT: each window's meter type and segment per kind of content
+        _, h = W:SectionHeader(parent, "SWITCH BY CONTENT", y); y = y - h
+        do
+            local function Off() return Cfg("contentSwitch") ~= true end
+            if not dmContentPick then dmContentPick = ns.DMContentCurrent and ns.DMContentCurrent() or "default" end
+            local contentValues, contentOrder = {}, {}
+            for _, key in ipairs(ns.DMContentKeys or {}) do
+                contentValues[key] = ns.DMContentNames[key]
+                contentOrder[#contentOrder + 1] = key
+            end
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Switch by Content",
+                  tooltip="Each window shows the meter type and segment set here for the content you enter; content without its own uses Default. A type or segment picked on a window lasts until the content changes.",
+                  getValue = function() return Cfg("contentSwitch") == true end,
+                  setValue = function(v)
+                      Set("contentSwitch", v)
+                      if ns.DMContentSync then ns.DMContentSync(true) end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="dropdown", text="Configure For", values = contentValues, order = contentOrder,
+                  getValue = function() return dmContentPick end,
+                  -- Rebuilt: the type lists below depend on the picked content
+                  setValue = function(v) dmContentPick = v; EllesmereUI:RefreshPage(true) end,
+                  disabled = Off, disabledTooltip = "Switch by Content" })
+            y = y - h
+
+            local T = Enum.DamageMeterType
+            local types = { T.DamageDone, T.HealingDone, T.DamageTaken, T.AvoidableDamageTaken,
+                T.EnemyDamageTaken, T.Interrupts, T.Dispels, T.Deaths }
+            local typeNames = {
+                [T.DamageDone] = "Damage Done", [T.HealingDone] = "Healing Done",
+                [T.DamageTaken] = "Damage Taken", [T.AvoidableDamageTaken] = "Avoidable Damage Taken",
+                [T.EnemyDamageTaken] = "Enemy Damage Taken", [T.Interrupts] = "Interrupts",
+                [T.Dispels] = "Dispels", [T.Deaths] = "Deaths",
+            }
+            local typeValues, typeOrder = {}, {}
+            if dmContentPick ~= "default" then
+                typeValues.same = "Same as Default"
+                typeOrder[1], typeOrder[2] = "same", "---"
+            end
+            for _, t in ipairs(types) do
+                typeValues[tostring(t)] = typeNames[t]
+                typeOrder[#typeOrder + 1] = tostring(t)
+            end
+            local S = Enum.DamageMeterSessionType
+            local segValues = { [tostring(S.Current)] = "Current", [tostring(S.Overall)] = "Overall" }
+            local segOrder = { tostring(S.Current), tostring(S.Overall) }
+
+            -- What a window shows for the picked content: its own pair, else
+            -- Default's, else what it shows now (before the first switch-on).
+            -- The rows always read this; Same as Default is only the way back.
+            local function Shown(i)
+                local wdb = DB().windows and DB().windows[i] or {}
+                return ns.DMContentGet(i, dmContentPick) or ns.DMContentGet(i, "default")
+                    or { dmType = wdb.curDMType or T.DamageDone, session = wdb.curSession or S.Current }
+            end
+            for i = 1, math.max(1, Cfg("windowCount") or 1) do
+                _, h = W:DualRow(parent, y,
+                    { type="dropdown", text=EllesmereUI.Lf("Window %d Meter Type", i),
+                      values = typeValues, order = typeOrder,
+                      getValue = function() return tostring(Shown(i).dmType) end,
+                      setValue = function(v)
+                          if v == "same" then ns.DMContentClear(i, dmContentPick)
+                          else ns.DMContentSet(i, dmContentPick, "dmType", tonumber(v)) end
+                          EllesmereUI:RefreshPage()
+                      end,
+                      disabled = Off, disabledTooltip = "Switch by Content" },
+                    { type="dropdown", text=EllesmereUI.Lf("Window %d Segment", i),
+                      values = segValues, order = segOrder,
+                      getValue = function() return tostring(Shown(i).session) end,
+                      setValue = function(v)
+                          ns.DMContentSet(i, dmContentPick, "session", tonumber(v))
+                          EllesmereUI:RefreshPage()
+                      end,
+                      disabled = Off, disabledTooltip = "Switch by Content" })
+                y = y - h
+            end
+        end
 
         -- ── HEADER ──────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "HEADER", y); y = y - h

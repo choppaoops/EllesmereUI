@@ -150,6 +150,9 @@ local DM_DEFAULTS = {
             -- reload restores the configured visibility.
             toggleIncludeTimer        = false, -- also toggle the standalone combat timer
             toggleIncludeSpellHistory = false, -- also toggle the spell history icon strip and bar window
+            -- Switch by Content: each window takes its meter type and segment for the
+            -- content the player enters (windows[i].content; contentLast = last applied)
+            contentSwitch = false,
             hdrBgColor      = { r = 0x1B/255, g = 0x1B/255, b = 0x1B/255 },
             hdrBgAlpha      = 1,
             hdrBottomBorderSize = 0,

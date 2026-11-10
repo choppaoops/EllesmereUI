@@ -388,10 +388,11 @@ local _feignDeathGUIDs = {}
 local _deathStamps = {}
 
 -- Switch a window to a segment (sessionID) or session type (Current/Overall); windows with
--- syncSegments switch together. On ns not local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
-function ns.ApplySegmentSelection(W, sessionType, sessionID)
+-- syncSegments switch together (not with noSync: Switch by Content sets each window on its own).
+-- On ns not local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
+function ns.ApplySegmentSelection(W, sessionType, sessionID, noSync)
     local targets = { W }
-    if WinDB(W.idx).syncSegments then
+    if not noSync and WinDB(W.idx).syncSegments then
         targets = {}
         for _, w in ipairs(_windows) do
             if WinDB(w.idx).syncSegments then targets[#targets + 1] = w end
@@ -530,6 +531,8 @@ instanceFrame:SetScript("OnEvent", function(_, event)
             C_DamageMeter.ResetAllCombatSessions()
         end
         SetCombatEndTime(0); SetCurViewFrozenDur(0)
+        -- Switch by Content replaces Default on M+ Start with its Mythic+ pair
+        local byContent = DB().contentSwitch
         -- Auto-swap: Overall -> Current on key start
         for _, w in ipairs(_windows) do
             local wdb2 = WinDB(w.idx)
@@ -539,11 +542,12 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                 w.curSessionID = nil
             end
             -- Default on M+ Start: switch this window to its configured meter type
-            if wdb2.mythicStartDMType and w.SetDMType then
+            if wdb2.mythicStartDMType and w.SetDMType and not byContent then
                 w.SetDMType(wdb2.mythicStartDMType)
             end
             w.Refresh()
         end
+        if byContent and ns.DMContentKeyStart then ns.DMContentKeyStart() end
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         -- Auto-swap: Current -> Overall on key completion
         for _, w in ipairs(_windows) do

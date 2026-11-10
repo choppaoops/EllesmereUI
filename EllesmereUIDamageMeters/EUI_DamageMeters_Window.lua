@@ -833,7 +833,7 @@ local function CreateDMWindow(winIdx)
               isActive = wdb.syncSegments, onClick = function()
                 wdb.syncSegments = not wdb.syncSegments
             end },
-            { text = L("Default on M+ Start"), noForever = true,
+            { text = L("Default on M+ Start"), noForever = true, noByContent = true,
               tooltip = L("Set your window to this Meter Type on dungeon start"),
               children = mStartChildren },
             { text = L("Settings"), onClick = function()
@@ -841,11 +841,15 @@ local function CreateDMWindow(winIdx)
             end },
         }
         -- WoW Forever has no delves and no keystones: the entries only those drive are
-        -- left out of the menu there (their saved values stay, and stay inert).
-        if EUI.IS_FOREVER then
+        -- left out of the menu there (their saved values stay, and stay inert). Switch by
+        -- Content's Mythic+ pair replaces Default on M+ Start while it is on.
+        local byContent = DB().contentSwitch == true
+        if EUI.IS_FOREVER or byContent then
             for i = #items, 1, -1 do
                 local e = items[i]
-                if type(e) == "table" and e.noForever then table.remove(items, i) end
+                if type(e) == "table" and ((EUI.IS_FOREVER and e.noForever) or (byContent and e.noByContent)) then
+                    table.remove(items, i)
+                end
             end
         end
         -- A Threat window's list settings head the menu (WoW Forever).

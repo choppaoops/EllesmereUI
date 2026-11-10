@@ -461,6 +461,8 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Restore the reset data and show/hide all windows keybinds
     ns.ApplyDMKeybinds()
+    -- Switch by Content: its events, when on (the zone-in after login applies it)
+    if ns.DMContentSync then ns.DMContentSync() end
 
     -- Defer window creation off the login frame to avoid blocking
     local cfg = DB()
@@ -551,6 +553,8 @@ initFrame:SetScript("OnEvent", function(self)
             _ttFrame:SetScale(sc)
         end
         ns._DMReviveTicks()
+        -- Switch by Content follows the new profile's setting and pairs
+        if ns.DMContentSync then ns.DMContentSync(true) end
     end
 end)
 
